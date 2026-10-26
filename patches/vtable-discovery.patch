@@ -1,0 +1,51 @@
+diff --git a/tools/recomp/analysis.cpp b/tools/recomp/analysis.cpp
+index 98682a5..ff34d06 100644
+--- a/tools/recomp/analysis.cpp
++++ b/tools/recomp/analysis.cpp
+@@ -405,6 +405,7 @@ void Analysis::Adopt(const std::vector<uint32_t>& calls, bool trusted) {
+ void Analysis::SeedPointers(bool late) {
+     std::vector<uint32_t> cands;
+     std::set<uint32_t> vtable;  // runs of code pointers, entries even without padding before them
++    std::set<uint32_t> readonly_vtable;
+     for (auto& s : img.sections) {
+         bool code = false;
+         for (auto& n : cfg.code_sections) code |= s.name == n;
+@@ -415,12 +416,37 @@ void Analysis::SeedPointers(bool late) {
+             if (!IsCode(v)) continue;
+             if (code) continue;  // pointers inside code sections come only from jump tables
+             cands.push_back(v);
+-            if ((o >= start + 4 && IsCode(img.U32(o - 4))) || (o + 8 <= end && IsCode(img.U32(o + 4)))) vtable.insert(v);
++            if ((o >= start + 4 && IsCode(img.U32(o - 4))) || (o + 8 <= end && IsCode(img.U32(o + 4)))) {
++                vtable.insert(v);
++                if (!(s.flags & xbe::kWritable)) readonly_vtable.insert(v);
++            }
+         }
+     }
+     std::sort(cands.begin(), cands.end());
+     cands.erase(std::unique(cands.begin(), cands.end()), cands.end());
+     size_t added = 0, rejected = 0;
++    // A virtual method may immediately follow an unvisited tail jump. Such
++    // an entry lacks padding, so the ordinary heuristic rejects it; gap fill
++    // can then decode across its start. Establish these read-only table
++    // entries before speculative candidates, with a decoded tail-jump boundary.
++    if (!late) {
++        for (uint32_t c : readonly_vtable) {
++            if (functions.count(c) || cover_[c - lo_] == 3) continue;
++            bool tail = false;
++            for (uint32_t bytes : {2u, 5u}) {
++                if (c < lo_ + bytes) continue;
++                Insn previous;
++                if (DecodeFlow(c - bytes, previous, nullptr) && previous.len == bytes &&
++                    previous.flow == Flow::Jmp && IsCode(previous.target)) tail = true;
++            }
++            if (!tail) continue;
++            functions.insert(c);
++            std::vector<uint32_t> calls;
++            Walk(c, true, &calls);
++            Adopt(calls, true);
++            added++;
++        }
++    }
+     // late: seeds rejected before the code above them was decoded, then decoded as the tail of the function that
+     // jumps to them. A conditional jump target is a label inside a function.
+     std::set<uint32_t> labels;

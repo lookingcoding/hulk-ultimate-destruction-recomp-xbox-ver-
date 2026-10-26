@@ -1,0 +1,43 @@
+﻿{
+    "CheckedUtc":  "2026-10-26T18:43:59.6200424Z",
+    "SdkBase":  "0fd00442660573dc342b41c11c6574318f0e8698",
+    "Hashes":  [
+                   {
+                       "Path":  "D:\\Projects\\Build Cache\\Hulk Recompiled\\release\\HulkRecompiled.exe",
+                       "Hash":  "7D0908017DB2CEFCF5E69B42E30C3119050F420124046C43ADCBC6E8E5FA6587"
+                   },
+                   {
+                       "Path":  "D:\\Projects\\Build Cache\\Hulk Recompiled\\release\\HulkRecompiled.dll",
+                       "Hash":  "A62AE97D2DB7EAB73FE2AE5B0F36399CEA5DFC99141FF47F4CA8C04B27B1DD96"
+                   },
+                   {
+                       "Path":  "D:\\Projects\\Active\\Hulk Recompiled\\config\\game.toml",
+                       "Hash":  "3DA4D03C0A079D032CB32DDB85BB5945C482D292F1C0FF51E232036391AB7CFA"
+                   },
+                   {
+                       "Path":  "D:\\Projects\\Active\\Hulk Recompiled\\patches\\audio-prebuffer.patch",
+                       "Hash":  "1014278F5A3B139719568FF6878F549F948DBB7255BE6AF3DA30E02120FF5182"
+                   },
+                   {
+                       "Path":  "D:\\Projects\\Active\\Hulk Recompiled\\patches\\optical-volume.patch",
+                       "Hash":  "7EBD9F1671CC77B98559A4C655183ABB726785AE9CBF489569F12F6FB11B5F85"
+                   },
+                   {
+                       "Path":  "D:\\Projects\\Active\\Hulk Recompiled\\patches\\vtable-discovery.patch",
+                       "Hash":  "262A25C681BD4498F851090C641F6F5593265E5186543D6E7464EDF0537D98A1"
+                   },
+                   {
+                       "Path":  "D:\\Projects\\Active\\Hulk Recompiled\\patches\\z-kernel-io.patch",
+                       "Hash":  "47A1E15B7DD20EDD3A5BB3521D03BE84BB4698D68566760367BFF5C696C8494B"
+                   }
+               ],
+    "UnitTests":  [
+                      "vtable_method_discovery",
+                      "keyboard_input_lifecycle",
+                      "kernel_io_completion"
+                  ],
+    "SmokeTest":  "600 seconds interactive tutorial + 195 seconds automated tutorial, hdd2, 0 logged runtime errors",
+    "SmokeTestLog":  "D:\\Projects\\Build Cache\\Hulk Recompiled\\release\\logs\\hulk-2_004.log",
+    "StandaloneInstall":  "D:\\Games\\Standalone\\Hulk Recompiled",
+    "FullGameValidated":  false
+}

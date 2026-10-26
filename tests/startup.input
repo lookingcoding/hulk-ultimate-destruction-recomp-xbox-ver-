@@ -1,0 +1,6 @@
+# milliseconds since application start, hold milliseconds, controller buttons
+# No OS input is sent. Normal runs ignore this file.
+12000 150 START
+18000 150 START
+24000 150 START
+30000 150 START

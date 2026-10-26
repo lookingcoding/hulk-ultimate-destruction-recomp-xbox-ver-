@@ -1,0 +1,10 @@
+# Smoke test: skip intros, enter title menu, choose the default game/profile path.
+# Game data and test saves stay in the local build directory.
+12000 150 START
+18000 150 START
+24000 150 START
+30000 150 START
+40000 150 START
+45000 150 A
+50000 150 A
+55000 150 A

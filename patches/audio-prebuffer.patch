@@ -1,0 +1,53 @@
+diff --git a/runtime/audio/xaudio2.cpp b/runtime/audio/xaudio2.cpp
+index f95ebf5..5f4836e 100644
+--- a/runtime/audio/xaudio2.cpp
++++ b/runtime/audio/xaudio2.cpp
+@@ -36,7 +36,6 @@ void StartOutput(std::function<void(float*, uint32_t)> render) {
+             LOGE("audio: XAudio2 unavailable (%08X), no sound", unsigned(hr));
+             return;
+         }
+-        voice->Start();
+         constexpr uint32_t kFrames = kRate / 100;
+         constexpr uint32_t kMinQueued = 3;
+         constexpr uint32_t kMaxQueued = 10;
+@@ -44,15 +43,26 @@ void StartOutput(std::function<void(float*, uint32_t)> render) {
+         constexpr uint32_t kSlots = kMaxQueued + 1;
+         std::vector<float> bufs(kSlots * kFrames * 2);
+         uint32_t depth = kMinQueued;
++        bool playing = false;
++        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+         for (uint32_t n = 0;;) {
+             XAUDIO2_VOICE_STATE st;
+             voice->GetState(&st, XAUDIO2_VOICE_NOSAMPLESPLAYED);
+             // a starved voice crackles: queue one buffer more each time, up to kMaxQueued
+-            if (n && !st.BuffersQueued && depth < kMaxQueued) {
++            if (playing && !st.BuffersQueued && depth < kMaxQueued) {
+                 depth++;
+                 LOGI("audio: output starved, queueing %u ms", depth * 10);
+             }
+             if (st.BuffersQueued >= depth) {
++                if (!playing) {
++                    hr = voice->Start();
++                    if (FAILED(hr)) {
++                        LOGE("audio: source voice start failed (%08X)", unsigned(hr));
++                        return;
++                    }
++                    playing = true;
++                    LOGI("audio: output started with %u ms buffered", depth * 10);
++                }
+                 Sleep(2);
+                 continue;
+             }
+@@ -61,7 +71,11 @@ void StartOutput(std::function<void(float*, uint32_t)> render) {
+             XAUDIO2_BUFFER xb{};
+             xb.AudioBytes = kFrames * 8;
+             xb.pAudioData = reinterpret_cast<const BYTE*>(b);
+-            voice->SubmitSourceBuffer(&xb);
++            hr = voice->SubmitSourceBuffer(&xb);
++            if (FAILED(hr)) {
++                LOGE("audio: buffer submission failed (%08X)", unsigned(hr));
++                return;
++            }
+             n++;  // only a submitted buffer takes a slot, XAudio2 still reads the queued ones
+         }
+     }).detach();

@@ -1,0 +1,192 @@
+diff --git a/runtime/kernel/files.cpp b/runtime/kernel/files.cpp
+index 8f97d2b..85420f7 100644
+--- a/runtime/kernel/files.cpp
++++ b/runtime/kernel/files.cpp
+@@ -80,6 +80,8 @@ struct File : Object {
+     bool listed = false;
+     bool delete_on_close = false;
+     std::mutex io;  // threads sharing a handle: seek and transfer stay together
++    ObjectRef completion;
++    uint32_t completion_key = 0;
+     File() : Object(ObjType::File) {}
+     ~File() override {
+         if (fp) std::fclose(fp);
+@@ -465,6 +467,7 @@ static uint32_t Finish(File& f, uint32_t status, uint32_t n, uint32_t event, uin
+     IoStatus(iosb, status, n);
+     SetEvent(f);
+     Complete(event, apc, apc_ctx, iosb);
++    if (f.completion && apc_ctx) PostIoCompletion(f.completion, f.completion_key, apc_ctx, status, n);
+     return status;
+ }
+ 
+@@ -583,6 +586,16 @@ KERNEL_EXPORT(226, NtSetInformationFile, 5) {
+             f->host = host;
+             break;
+         }
++        case 30: {  // FileCompletionInformation: port handle, completion key
++            if (a[3] < 8) return kInvalidParameter;
++            auto port = FromHandle(R32(in));
++            if (!port) return kInvalidHandle;
++            if (!IsIoCompletion(port)) return kObjectTypeMismatch;
++            std::lock_guard lock(f->io);
++            f->completion = std::move(port);
++            f->completion_key = R32(in + 4);
++            break;
++        }
+         case 4:  // basic, times and attributes are not kept
+             break;
+         default:
+diff --git a/runtime/kernel/io_completion.cpp b/runtime/kernel/io_completion.cpp
+new file mode 100644
+index 0000000..9f6446e
+--- /dev/null
++++ b/runtime/kernel/io_completion.cpp
+@@ -0,0 +1,135 @@
++// Original Xbox I/O completion ports and user completion dispatch.
++// Public interfaces: XboxDev/nxdk lib/xboxkrnl/xboxkrnl.h (CC0).
++#include <chrono>
++#include "kernel/exports.h"
++
++namespace kernel {
++namespace {
++struct Packet { uint32_t key, context, status, information; };
++struct CompletionPort final : Object {
++    std::deque<Packet> packets;
++    std::condition_variable ready;
++    CompletionPort() : Object(ObjType::Queue) {}
++};
++std::shared_ptr<CompletionPort> Port(const ObjectRef& object) {
++    return std::dynamic_pointer_cast<CompletionPort>(object);
++}
++uint32_t ObjectType(const Object& object) {
++    switch (object.type) {
++        case ObjType::Event: return DataAddress(16);
++        case ObjType::Semaphore: return DataAddress(30);
++        case ObjType::Mutant: return DataAddress(22);
++        case ObjType::Timer: return DataAddress(31);
++        case ObjType::Thread: return DataAddress(259);
++        case ObjType::File: return DataAddress(71);
++        case ObjType::SymLink: return DataAddress(249);
++        case ObjType::Device: return DataAddress(70);
++        case ObjType::Queue: return DataAddress(64);
++        default: return 0;
++    }
++}
++constexpr uint32_t KernelAddress(uint32_t ordinal) { return 0xFE000000u + ordinal * 4; }
++}
++
++bool IsIoCompletion(const ObjectRef& object) { return bool(Port(object)); }
++
++uint32_t PostIoCompletion(const ObjectRef& object, uint32_t key, uint32_t context, uint32_t status, uint32_t information) {
++    auto port = Port(object);
++    if (!port) return kObjectTypeMismatch;
++    {
++        std::lock_guard lock(DispatchLock());
++        port->packets.push_back({key, context, status, information});
++        SetSignal(*port, int32_t(port->packets.size()));
++        SignalChanged();
++    }
++    port->ready.notify_one();
++    return kSuccess;
++}
++
++KERNEL_EXPORT(191, NtCreateIoCompletion, 4) {
++    if (!a[0]) return kInvalidParameter;
++    std::string name = a[2] ? ReadAnsiString(R32(a[2] + 4)) : std::string();
++    if (!name.empty()) {
++        if (auto existing = FindNamed(name)) {
++            if (!Port(existing)) return kObjectTypeMismatch;
++            W32(a[0], NewHandle(existing));
++            return kObjectNameExists;
++        }
++    }
++    auto port = std::make_shared<CompletionPort>();
++    if (!name.empty()) AddNamed(name, port);
++    W32(a[0], NewHandle(port));
++    return kSuccess;
++}
++
++KERNEL_EXPORT(227, NtSetIoCompletion, 5) {
++    auto object = FromHandle(a[0]);
++    if (!object) return kInvalidHandle;
++    return PostIoCompletion(object, a[1], a[2], a[3], a[4]);
++}
++
++KERNEL_EXPORT(223, NtRemoveIoCompletion, 5) {
++    auto object = FromHandle(a[0]);
++    if (!object) return kInvalidHandle;
++    auto port = Port(object);
++    if (!port) return kObjectTypeMismatch;
++    if (!a[1] || !a[2] || !a[3]) return kInvalidParameter;
++    const bool infinite = !a[4];
++    const int64_t deadline = infinite ? 0 : ToDeadline(int64_t(R64(a[4])));
++    std::unique_lock lock(DispatchLock());
++    while (port->packets.empty()) {
++        if (infinite) port->ready.wait(lock);
++        else {
++            int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
++            if (now >= deadline) return kTimeout;
++            port->ready.wait_for(lock, std::chrono::nanoseconds(deadline - now));
++        }
++    }
++    Packet packet = port->packets.front();
++    port->packets.pop_front();
++    SetSignal(*port, int32_t(port->packets.size()));
++    W32(a[1], packet.key);
++    W32(a[2], packet.context);
++    W32(a[3], packet.status);
++    W32(a[3] + 4, packet.information);
++    return kSuccess;
++}
++
++KERNEL_EXPORT(243, ObOpenObjectByName, 4) {
++    if (!a[0] || !a[3]) return kInvalidParameter;
++    std::string name = ReadAnsiString(R32(a[0] + 4));
++    if (uint32_t root = R32(a[0])) {
++        auto parent = FromHandle(root);
++        if (!parent) return kInvalidHandle;
++        if (!parent->name.empty()) name = parent->name + "\\" + name;
++    }
++    auto object = FindNamed(name);
++    if (!object) return kObjectNameNotFound;
++    if (a[1] && ObjectType(*object) != a[1]) return kObjectTypeMismatch;
++    W32(a[3], NewHandle(object));
++    return kSuccess;
++}
++
++KERNEL_EXPORT(232, NtUserIoApcDispatcher, 3) {
++    if (!a[0] || !a[1]) return kInvalidParameter;
++    uint32_t error = CallGuest(ctx, KernelAddress(301), {R32(a[1])});
++    CallGuest(ctx, a[0], {error, R32(a[1] + 4), a[1]});
++    return 0;
++}
++
++KERNEL_EXPORT(76, IoQueryVolumeInformation, 5) {
++    const uint32_t file = a[0], cls = a[1], length = a[2], output = a[3], returned = a[4];
++    if (!file || !output) return kInvalidParameter;
++    auto object = FromPointer(file);
++    if (!object || object->type != ObjType::File) return kObjectTypeMismatch;
++    uint32_t handle = NewHandle(object);
++    ctx.esp -= 16;
++    uint32_t iosb = ctx.esp;
++    W64(iosb, 0);
++    uint32_t status = CallGuest(ctx, KernelAddress(218), {handle, iosb, output, length, cls});
++    if (returned) W32(returned, R32(iosb + 4));
++    ctx.esp += 16;
++    CloseHandle(handle);
++    return status;
++}
++}
+diff --git a/runtime/kernel/kernel.h b/runtime/kernel/kernel.h
+index 163ea09..412bc84 100644
+--- a/runtime/kernel/kernel.h
++++ b/runtime/kernel/kernel.h
+@@ -128,6 +128,8 @@ ObjectRef FromPointer(uint32_t guest);  // dispatcher object in guest memory, cr
+ void Bind(ObjectRef obj, uint32_t guest);
+ ObjectRef FindNamed(const std::string& name);
+ void AddNamed(const std::string& name, ObjectRef obj);
++bool IsIoCompletion(const ObjectRef& object);
++uint32_t PostIoCompletion(const ObjectRef& object, uint32_t key, uint32_t context, uint32_t status, uint32_t information);
+ 
+ // dispatcher
+ std::mutex& DispatchLock();

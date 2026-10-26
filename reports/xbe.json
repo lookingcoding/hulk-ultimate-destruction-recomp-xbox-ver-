@@ -1,0 +1,278 @@
+{
+    "Title":  "The Incredible Hulk:Ultimate Destruction",
+    "TitleId":  "0x56550039",
+    "Entry":  "0x0020AAC6",
+    "ImageBase":  "0x00010000",
+    "ImageSize":  5752768,
+    "SHA256":  "CE236582A5F65F0732B0EFC612AC83430B2A98276C6FF8763979ABC0E94782F4",
+    "Libraries":  [
+                      {
+                          "Name":  "XAPILIB",
+                          "Major":  1,
+                          "Minor":  0,
+                          "Build":  5849,
+                          "Flags":  "0x4001"
+                      },
+                      {
+                          "Name":  "XBOXKRNL",
+                          "Major":  1,
+                          "Minor":  0,
+                          "Build":  5849,
+                          "Flags":  "0x4001"
+                      },
+                      {
+                          "Name":  "LIBCMT",
+                          "Major":  1,
+                          "Minor":  0,
+                          "Build":  5849,
+                          "Flags":  "0x4001"
+                      },
+                      {
+                          "Name":  "D3D8",
+                          "Major":  1,
+                          "Minor":  0,
+                          "Build":  5849,
+                          "Flags":  "0x400F"
+                      },
+                      {
+                          "Name":  "XGRAPHC",
+                          "Major":  1,
+                          "Minor":  0,
+                          "Build":  5849,
+                          "Flags":  "0x4009"
+                      },
+                      {
+                          "Name":  "DSOUND",
+                          "Major":  1,
+                          "Minor":  0,
+                          "Build":  5849,
+                          "Flags":  "0x400B"
+                      }
+                  ],
+    "Sections":  [
+                     {
+                         "Name":  ".text",
+                         "Address":  "0x00011000",
+                         "VirtualSize":  3490548,
+                         "RawOffset":  4096,
+                         "RawSize":  3490548,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINK",
+                         "Address":  "0x00365300",
+                         "VirtualSize":  67548,
+                         "RawOffset":  3497984,
+                         "RawSize":  67548,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINK32",
+                         "Address":  "0x00375AE0",
+                         "VirtualSize":  4709,
+                         "RawOffset":  3567616,
+                         "RawSize":  4708,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINK32A",
+                         "Address":  "0x00376D60",
+                         "VirtualSize":  5497,
+                         "RawOffset":  3575808,
+                         "RawSize":  5496,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINK16",
+                         "Address":  "0x003782E0",
+                         "VirtualSize":  4892,
+                         "RawOffset":  3584000,
+                         "RawSize":  4892,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINK4444",
+                         "Address":  "0x00379600",
+                         "VirtualSize":  5536,
+                         "RawOffset":  3592192,
+                         "RawSize":  5536,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINK5551",
+                         "Address":  "0x0037ABA0",
+                         "VirtualSize":  4404,
+                         "RawOffset":  3600384,
+                         "RawSize":  4404,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINKYUY2",
+                         "Address":  "0x0037BCE0",
+                         "VirtualSize":  3244,
+                         "RawOffset":  3608576,
+                         "RawSize":  3244,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINKYUY2",
+                         "Address":  "0x0037C9A0",
+                         "VirtualSize":  156,
+                         "RawOffset":  3612672,
+                         "RawSize":  156,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINKYUY2",
+                         "Address":  "0x0037CA40",
+                         "VirtualSize":  184,
+                         "RawOffset":  3616768,
+                         "RawSize":  184,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINKYUY2",
+                         "Address":  "0x0037CB00",
+                         "VirtualSize":  136,
+                         "RawOffset":  3620864,
+                         "RawSize":  136,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINK16MX",
+                         "Address":  "0x0037CBA0",
+                         "VirtualSize":  304,
+                         "RawOffset":  3624960,
+                         "RawSize":  304,
+                         "Flags":  "0x36"
+                     },
+                     {
+                         "Name":  "BINK16X2",
+                         "Address":  "0x0037CCE0",
+                         "VirtualSize":  1368,
+                         "RawOffset":  3629056,
+                         "RawSize":  1368,
+                         "Flags":  "0x16"
+                     },
+                     {
+                         "Name":  "BINK16M",
+                         "Address":  "0x0037D240",
+                         "VirtualSize":  504,
+                         "RawOffset":  3633152,
+                         "RawSize":  504,
+                         "Flags":  "0x6"
+                     },
+                     {
+                         "Name":  "BINK32MX",
+                         "Address":  "0x0037D440",
+                         "VirtualSize":  444,
+                         "RawOffset":  3637248,
+                         "RawSize":  444,
+                         "Flags":  "0x6"
+                     },
+                     {
+                         "Name":  "BINK32X2",
+                         "Address":  "0x0037D600",
+                         "VirtualSize":  1420,
+                         "RawOffset":  3641344,
+                         "RawSize":  1420,
+                         "Flags":  "0x6"
+                     },
+                     {
+                         "Name":  "BINK32M",
+                         "Address":  "0x0037DBA0",
+                         "VirtualSize":  332,
+                         "RawOffset":  3645440,
+                         "RawSize":  332,
+                         "Flags":  "0x6"
+                     },
+                     {
+                         "Name":  "D3D",
+                         "Address":  "0x0037DD00",
+                         "VirtualSize":  143972,
+                         "RawOffset":  3649536,
+                         "RawSize":  129416,
+                         "Flags":  "0x7"
+                     },
+                     {
+                         "Name":  "XGRPH",
+                         "Address":  "0x003A0F80",
+                         "VirtualSize":  146904,
+                         "RawOffset":  3780608,
+                         "RawSize":  143708,
+                         "Flags":  "0x7"
+                     },
+                     {
+                         "Name":  "DSOUND",
+                         "Address":  "0x003C4D60",
+                         "VirtualSize":  156820,
+                         "RawOffset":  3928064,
+                         "RawSize":  156188,
+                         "Flags":  "0x7"
+                     },
+                     {
+                         "Name":  "XPP",
+                         "Address":  "0x003EB200",
+                         "VirtualSize":  33940,
+                         "RawOffset":  4087808,
+                         "RawSize":  33940,
+                         "Flags":  "0x7"
+                     },
+                     {
+                         "Name":  ".rdata",
+                         "Address":  "0x003F36A0",
+                         "VirtualSize":  636184,
+                         "RawOffset":  4124672,
+                         "RawSize":  636168,
+                         "Flags":  "0x6"
+                     },
+                     {
+                         "Name":  ".data",
+                         "Address":  "0x0048EBC0",
+                         "VirtualSize":  929376,
+                         "RawOffset":  4763648,
+                         "RawSize":  324972,
+                         "Flags":  "0x7"
+                     },
+                     {
+                         "Name":  "BINKDATA",
+                         "Address":  "0x00571A20",
+                         "VirtualSize":  62976,
+                         "RawOffset":  5091328,
+                         "RawSize":  62964,
+                         "Flags":  "0x7"
+                     },
+                     {
+                         "Name":  "DOLBY",
+                         "Address":  "0x00581020",
+                         "VirtualSize":  29056,
+                         "RawOffset":  5156864,
+                         "RawSize":  29036,
+                         "Flags":  "0x26"
+                     },
+                     {
+                         "Name":  "$$XTIMAGE",
+                         "Address":  "0x005881A0",
+                         "VirtualSize":  10240,
+                         "RawOffset":  5189632,
+                         "RawSize":  10240,
+                         "Flags":  "0x38"
+                     },
+                     {
+                         "Name":  "$$XSIMAGE",
+                         "Address":  "0x0058A9A0",
+                         "VirtualSize":  4096,
+                         "RawOffset":  5201920,
+                         "RawSize":  4096,
+                         "Flags":  "0x38"
+                     },
+                     {
+                         "Name":  ".XTLID",
+                         "Address":  "0x0058B9A0",
+                         "VirtualSize":  3592,
+                         "RawOffset":  5206016,
+                         "RawSize":  3592,
+                         "Flags":  "0x38"
+                     }
+                 ]
+}

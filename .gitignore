@@ -1,0 +1,39 @@
+﻿# build
+/out/
+/build/
+*.zip
+*.pdb
+*.exe
+*.obj
+*.o
+
+# recompiled code, derived from the game
+/generated/
+/reports/*.asm
+
+# user's own game files - ISO and retail assets are strictly excluded
+/assets/
+assets/*
+*.iso
+*.xiso.iso
+*.xbe
+*.bin
+*.raw
+
+# runtime files
+settings.toml
+/logs/
+/hdd/
+/hdd*/
+/captures/
+/CrashDumps/
+release/
+compiler/
+
+# editors
+.vs/
+.vscode/
+.idea/
+
+# Local temporary folder
+.local

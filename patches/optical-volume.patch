@@ -1,0 +1,109 @@
+diff --git a/runtime/kernel/files.cpp b/runtime/kernel/files.cpp
+index 5644ea7..8f97d2b 100644
+--- a/runtime/kernel/files.cpp
++++ b/runtime/kernel/files.cpp
+@@ -72,6 +72,7 @@ struct File : Object {
+     FILE* fp = nullptr;
+     const Disc::Entry* entry = nullptr;  // on the disc image instead of a host path
+     bool dir = false;
++    bool optical = false;  // CdRom0 also when backed by extracted host files
+     uint64_t pos = 0;
+     std::vector<fs::directory_entry> entries;
+     std::vector<const Disc::Entry*> disc_entries;
+@@ -232,6 +233,7 @@ struct Target {
+     std::string host;                    // empty on the disc image or unmapped
+     bool disc = false;                   // on the mounted disc image
+     const Disc::Entry* entry = nullptr;  // there: the file or folder, null when missing
++    bool optical = false;
+ };
+ 
+ Target Resolve(const std::string& xbox_path, uint32_t root_handle) {
+@@ -272,8 +274,8 @@ Target Resolve(const std::string& xbox_path, uint32_t root_handle) {
+     for (auto& part : parts)
+         if (part.find(':') != std::string::npos) return {};
+     if (best->first == kCdRom)
+-        if (const Disc* disc = MountedDisc()) return {{}, true, disc->Find(parts)};
+-    return {MatchCase(best->second, parts).string()};
++        if (const Disc* disc = MountedDisc()) return {{}, true, disc->Find(parts), true};
++    return {MatchCase(best->second, parts).string(), false, nullptr, best->first == kCdRom};
+ }
+ 
+ // the disc image is read only: nothing on it is created, replaced or written
+@@ -295,6 +297,7 @@ uint32_t OpenOnDisc(const Disc::Entry* e, const std::string& name, uint32_t hand
+     auto f = std::make_shared<File>();
+     f->xbox = Normalize(name);
+     f->entry = e;
++    f->optical = true;
+     f->dir = e->dir;
+     W32(handle_out, NewHandle(f));
+     IoStatus(iosb, kSuccess, 1);
+@@ -357,6 +360,7 @@ KERNEL_EXPORT(190, NtCreateFile, 9) {
+         }
+         auto f = std::make_shared<File>();
+         f->host = host;
++        f->optical = t.optical;
+         f->xbox = Normalize(name);
+         f->dir = true;
+         W32(handle_out, NewHandle(f));
+@@ -415,6 +419,7 @@ KERNEL_EXPORT(190, NtCreateFile, 9) {
+     }
+     auto f = std::make_shared<File>();
+     f->host = host;
++    f->optical = t.optical;
+     f->xbox = Normalize(name);
+     f->fp = fp;
+     f->delete_on_close = options & 0x1000;  // FILE_DELETE_ON_CLOSE
+@@ -440,6 +445,7 @@ KERNEL_EXPORT(202, NtOpenFile, 6) {
+     }
+     auto f = std::make_shared<File>();
+     f->host = host;
++    f->optical = t.optical;
+     f->xbox = Normalize(name);
+     f->dir = fs::is_directory(host, ec);
+     if (!f->dir) {
+@@ -588,22 +594,36 @@ KERNEL_EXPORT(226, NtSetInformationFile, 5) {
+ }
+ 
+ KERNEL_EXPORT(218, NtQueryVolumeInformationFile, 5) {
++    auto file = FileFromHandle(a[0]);
++    if (!file) return kInvalidHandle;
+     uint32_t iosb = a[1], out = a[2], len = a[3], cls = a[4];
++    const bool optical = file->optical;
++    uint64_t units = optical ? 0x200000 : 0x100000;
++    if (optical) {
++        if (const Disc* disc = MountedDisc()) {
++            std::error_code ec;
++            uint64_t bytes = fs::file_size(disc->Path(), ec);
++            if (!ec) units = (bytes + 2047) / 2048;
++        }
++    }
++    LOG_FIRST(8, "volume: %s class %u, sector %u", optical ? "DVD" : "HDD", cls, optical ? 2048 : 512);
+     std::memset(HostPtr(out), 0, len);
+     switch (cls) {
+         case 3:  // FileFsSizeInformation: 16 GiB total, 8 GiB free in 16 KiB units
+-            W64(out, 0x100000);
+-            W64(out + 8, 0x80000);
+-            W32(out + 0x10, 32);
+-            W32(out + 0x14, 512);
++            if (len < 0x18) return kInvalidParameter;
++            W64(out, units);
++            W64(out + 8, optical ? 0 : 0x80000);
++            W32(out + 0x10, optical ? 1 : 32);
++            W32(out + 0x14, optical ? 2048 : 512);
+             IoStatus(iosb, kSuccess, 0x18);
+             return kSuccess;
+         case 7:  // FileFsFullSizeInformation
+-            W64(out, 0x100000);
+-            W64(out + 8, 0x80000);
+-            W64(out + 0x10, 0x80000);
+-            W32(out + 0x18, 32);
+-            W32(out + 0x1C, 512);
++            if (len < 0x20) return kInvalidParameter;
++            W64(out, units);
++            W64(out + 8, optical ? 0 : 0x80000);
++            W64(out + 0x10, optical ? 0 : 0x80000);
++            W32(out + 0x18, optical ? 1 : 32);
++            W32(out + 0x1C, optical ? 2048 : 512);
+             IoStatus(iosb, kSuccess, 0x20);
+             return kSuccess;
+         case 1:  // FileFsVolumeInformation
