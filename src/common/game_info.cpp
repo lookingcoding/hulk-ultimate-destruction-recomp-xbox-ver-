@@ -1,4 +1,3 @@
-﻿#include <imgui.h>
 #include "app/app.h"
 #include "common/keyboard.h"
 #include "common/diagnostics.h"
@@ -6,14 +5,11 @@
 
 namespace {
 void OnWindowReady(void* hwnd) {
-    if (ImGui::GetCurrentContext()) {
-        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
-    }
     hulk::SetGameWindow(hwnd);
 }
 }  // namespace
 
-// what the runtime asks of the game; strings must be set, hooks may stay null
+// What the runtime asks of the game; strings must be set, hooks may stay null
 const app::GameInfo app::kGame = {
     .title = L"The Incredible Hulk: Ultimate Destruction",               // window and splash
     .short_title = L"Hulk Recompiled",               // message boxes
@@ -30,7 +26,7 @@ const app::GameInfo app::kGame = {
     .loaded = nullptr,                    // image in memory, before its entry point runs
     .window = OnWindowReady,              // the game window is up
     .message = hulk::KeyboardMessage,
-    .ui = hulk::DrawSettingsUi,           // ImGui drawing each frame
+    .ui = nullptr,                        // Pure native console interface (no ImGui overlay)
     .pad = hulk::KeyboardPad,
     .rumble = nullptr,                    // changes a rumble before it is set
 };

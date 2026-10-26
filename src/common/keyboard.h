@@ -15,10 +15,4 @@ void SetMouseInvertY(bool invert);
 bool GetMouseInvertY();
 void SetMouseSmoothing(bool smoothing);
 bool GetMouseSmoothing();
-
-// Settings / Options menu state
-bool IsSettingsOpen();
-void SetSettingsOpen(bool open);
-void ToggleSettings();
-bool IsCurrentScreenOptions();
 }

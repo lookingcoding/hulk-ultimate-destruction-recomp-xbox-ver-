@@ -18,11 +18,11 @@
 namespace hulk {
 namespace {
 using Clock = std::chrono::steady_clock;
-constexpr auto kPulseMinHold = std::chrono::milliseconds(20);
-constexpr auto kPulseMinGap = std::chrono::milliseconds(15);
+constexpr auto kPulseMinHold = std::chrono::milliseconds(25);
+constexpr auto kPulseMinGap = std::chrono::milliseconds(20);
 constexpr int kMinPollsPerPhase = 1;
 constexpr int kMenuMoveStepPixels = 40;
-constexpr size_t kMaxQueuedSteps = 8;
+constexpr size_t kMaxQueuedSteps = 4;
 constexpr UINT kSyncCursorMsg = WM_APP + 42;
 constexpr float kCameraDeadzone = 7500.0f;
 constexpr float kCameraSensitivity = 950.0f;
@@ -115,16 +115,14 @@ std::atomic<bool> cursor_hidden{false};
 std::atomic<int> last_polled_menu_state{-1};
 std::atomic<bool> raw_input_registered{false};
 
-// Configurable PC controls
+// Configurable PC controls (persisted in settings.toml)
 std::atomic<float> mouse_sensitivity{1.0f};
 std::atomic<bool> mouse_invert_y{false};
 std::atomic<bool> mouse_smoothing{false};
-std::atomic<bool> settings_open{false};
 
-// Menu hit-testing and selection tracking
+// Menu selection tracking
 std::atomic<int> current_menu_selected_row{0};
 std::atomic<uint32_t> last_menu_flow_state{0};
-std::atomic<int> last_known_hover_row{-1};
 
 std::mutex mouse_mutex;
 ButtonLatch mouse_left{};
@@ -182,32 +180,20 @@ bool IsInMenuState() {
     return !(cur_state == 4u && req_state == 4u);
 }
 
-// Returns the hovered menu row index (0..N-1), or -1 if not over any row.
-// In 640x480 virtual viewport space:
-// Pause Menu (GS_PAUSE = 6): 6 rows (0=Resume, 1=Move Gallery, 2=Objectives, 3=Options, 4=Restart, 5=Quit)
-// Frontend Menu (GS_FRONTEND = 1): 4 rows (0=Play, 1=Load, 2=Options, 3=Credits)
-int GetHoveredMenuRow(uint32_t flow_state, int cursor_x, int cursor_y, int client_w, int client_h) {
+// Returns the menu row index under the cursor, or -1 if outside menu rows.
+// Native menu items start at Y ~110 and are spaced ~31.5px apart in 640x480 space.
+int GetHoveredMenuRow(int cursor_x, int cursor_y, int client_w, int client_h) {
     if (client_w <= 0 || client_h <= 0) return -1;
     const float vx = (static_cast<float>(cursor_x) / static_cast<float>(client_w)) * 640.0f;
     const float vy = (static_cast<float>(cursor_y) / static_cast<float>(client_h)) * 480.0f;
 
-    if (flow_state == 6) {  // GS_PAUSE (Pause Menu)
-        if (vx >= 140.0f && vx <= 500.0f) {
-            constexpr float kStartY = 145.0f;
-            constexpr float kRowH = 43.0f;
-            if (vy >= kStartY && vy < kStartY + 6 * kRowH) {
-                int row = static_cast<int>((vy - kStartY) / kRowH);
-                return std::clamp(row, 0, 5);
-            }
-        }
-    } else if (flow_state == 1) {  // GS_FRONTEND (Main Title Screen)
-        if (vx >= 150.0f && vx <= 490.0f) {
-            constexpr float kStartY = 165.0f;
-            constexpr float kRowH = 45.0f;
-            if (vy >= kStartY && vy < kStartY + 4 * kRowH) {
-                int row = static_cast<int>((vy - kStartY) / kRowH);
-                return std::clamp(row, 0, 3);
-            }
+    // Menu text & highlight bars span across the center of the screen
+    if (vx >= 50.0f && vx <= 590.0f) {
+        constexpr float kStartY = 110.0f;
+        constexpr float kRowH = 31.5f;
+        if (vy >= kStartY && vy < kStartY + 6 * kRowH) {
+            int row = static_cast<int>((vy - kStartY) / kRowH);
+            return std::clamp(row, 0, 5);
         }
     }
     return -1;
@@ -232,7 +218,7 @@ bool CenterCursorInWindow(HWND hwnd, POINT& center_client) {
 }
 
 void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
-    const bool should_hide = !in_menu && !settings_open.load(std::memory_order_relaxed) && window_focused.load(std::memory_order_relaxed);
+    const bool should_hide = !in_menu && window_focused.load(std::memory_order_relaxed);
     const bool was_hidden = cursor_hidden.exchange(should_hide, std::memory_order_relaxed);
     if (should_hide) {
         if (!was_hidden) {
@@ -300,7 +286,6 @@ void Clear() {
     look_dx = 0.0f;
     look_dy = 0.0f;
     has_raw_delta = false;
-    last_known_hover_row.store(-1, std::memory_order_relaxed);
 }
 }  // namespace
 
@@ -310,42 +295,6 @@ void SetMouseInvertY(bool invert) { mouse_invert_y.store(invert, std::memory_ord
 bool GetMouseInvertY() { return mouse_invert_y.load(std::memory_order_relaxed); }
 void SetMouseSmoothing(bool smoothing) { mouse_smoothing.store(smoothing, std::memory_order_relaxed); }
 bool GetMouseSmoothing() { return mouse_smoothing.load(std::memory_order_relaxed); }
-
-bool IsSettingsOpen() { return settings_open.load(std::memory_order_relaxed); }
-void SetSettingsOpen(bool open) {
-    settings_open.store(open, std::memory_order_relaxed);
-    if (HWND hwnd = game_hwnd.load(std::memory_order_relaxed); hwnd && IsWindow(hwnd)) {
-        ApplyCursorVisibilityOnWindowThread(hwnd, IsInMenuState());
-    }
-}
-void ToggleSettings() {
-    SetSettingsOpen(!IsSettingsOpen());
-}
-
-bool IsCurrentScreenOptions() {
-    const uint8_t* base = mem::Base();
-    if (!base) return false;
-    uint32_t screen_mgr = 0;
-    if (!ReadGuestU32(base, 0x004E2BA0u, screen_mgr) || !screen_mgr) return false;
-    uint32_t cur_screen = 0;
-    if (!ReadGuestU32(base, screen_mgr + 0x175Cu, cur_screen) || !cur_screen) return false;
-
-    // In cur_screen object, check if any of the first 32 dwords references the "options" string (0x0040A9F0)
-    for (uint32_t off = 0; off < 0x80u; off += 4) {
-        uint32_t val = 0;
-        if (ReadGuestU32(base, cur_screen + off, val)) {
-            if (val == 0x0040A9F0u) return true;
-            if (val >= 0x00010000u && val < 0x00580000u) {
-                if (std::memcmp(base + val, "options\0", 8) == 0) return true;
-            }
-        }
-    }
-    uint32_t flag = 0;
-    if (ReadGuestU32(base, 0x004E436Cu, flag) && (flag & 0xFF) == 1) {
-        return true;
-    }
-    return false;
-}
 
 void SetGameWindow(void* hwnd) {
     HWND w = static_cast<HWND>(hwnd);
@@ -393,7 +342,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         return true;
     }
 
-    const bool in_menu = IsInMenuState() || settings_open.load(std::memory_order_relaxed);
+    const bool in_menu = IsInMenuState();
     ApplyCursorVisibilityOnWindowThread(hwnd, in_menu);
 
     if (message == WM_SETCURSOR && LOWORD(lp) == HTCLIENT) {
@@ -405,19 +354,6 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         if (hwnd && IsWindow(hwnd)) SetCursor(LoadCursor(nullptr, IDC_ARROW));
         if (result) *result = 1;
         return true;
-    }
-
-    if (message == WM_KEYDOWN) {
-        if (wp == VK_F1 || wp == VK_OEM_3) {  // F1 or `~`
-            ToggleSettings();
-            if (result) *result = 0;
-            return true;
-        }
-        if (wp == VK_ESCAPE && settings_open.load(std::memory_order_relaxed)) {
-            SetSettingsOpen(false);
-            if (result) *result = 0;
-            return true;
-        }
     }
 
     if (message == WM_KEYDOWN || message == WM_KEYUP) {
@@ -452,7 +388,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         return false;
     }
 
-    // Determine window client size for viewport coordinate mapping
+    // Determine window client dimensions
     int client_w = 640, client_h = 480;
     if (hwnd && IsWindow(hwnd)) {
         RECT rc{};
@@ -462,36 +398,18 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         }
     }
 
-    const uint32_t flow_state = GetGameFlowState();
-
     switch (message) {
         case WM_LBUTTONDOWN:
         case WM_LBUTTONDBLCLK: {
-            if (settings_open.load(std::memory_order_relaxed)) {
-                break;
-            }
+            std::lock_guard lock(mouse_mutex);
+            // In menus, ensure the row currently under the cursor is selected
             if (in_menu) {
-                const int hovered = last_known_hover_row.load(std::memory_order_relaxed);
-                const bool is_test = (test_mode_override.load(std::memory_order_relaxed) > 0);
-
+                const int hovered = GetHoveredMenuRow(last_cursor_x, last_cursor_y, client_w, client_h);
                 if (hovered >= 0) {
-                    // Check if clicking Options (Row 3 in Pause Menu, Row 2 in Frontend Title Menu)
-                    if ((flow_state == 6 && hovered == 3) || (flow_state == 1 && hovered == 2)) {
-                        SetSettingsOpen(true);
-                    } else {
-                        std::lock_guard lock(mouse_mutex);
-                        current_menu_selected_row.store(hovered, std::memory_order_relaxed);
-                        mouse_left.Press();
-                    }
-                } else if (is_test || (flow_state != 1 && flow_state != 6)) {
-                    // Fallback for tests or non-standard submenus
-                    std::lock_guard lock(mouse_mutex);
-                    mouse_left.Press();
+                    current_menu_selected_row.store(hovered, std::memory_order_relaxed);
                 }
-            } else {
-                std::lock_guard lock(mouse_mutex);
-                mouse_left.Press();
             }
+            mouse_left.Press();
             break;
         }
         case WM_LBUTTONUP: {
@@ -501,10 +419,6 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         }
         case WM_RBUTTONDOWN:
         case WM_RBUTTONDBLCLK: {
-            if (settings_open.load(std::memory_order_relaxed)) {
-                SetSettingsOpen(false);
-                break;
-            }
             std::lock_guard lock(mouse_mutex);
             mouse_right.Press();
             break;
@@ -515,7 +429,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
             break;
         }
         case WM_MOUSEWHEEL: {
-            if (!in_menu || settings_open.load(std::memory_order_relaxed)) break;
+            if (!in_menu) break;
             std::lock_guard lock(mouse_mutex);
             wheel_v_accum += GET_WHEEL_DELTA_WPARAM(wp);
             const bool horizontal = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) != 0 || Down(VK_SHIFT);
@@ -530,7 +444,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
             break;
         }
         case WM_MOUSEHWHEEL: {
-            if (!in_menu || settings_open.load(std::memory_order_relaxed)) break;
+            if (!in_menu) break;
             std::lock_guard lock(mouse_mutex);
             wheel_h_accum += GET_WHEEL_DELTA_WPARAM(wp);
             while (wheel_h_accum >= WHEEL_DELTA) {
@@ -560,41 +474,29 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
             if (dx == 0 && dy == 0) break;
 
             if (in_menu) {
-                if (!settings_open.load(std::memory_order_relaxed)) {
-                    // Check if hovering over a specific menu item row
-                    const int hovered = GetHoveredMenuRow(flow_state, x, y, client_w, client_h);
-                    last_known_hover_row.store(hovered, std::memory_order_relaxed);
-
-                    if (hovered >= 0) {
-                        const int sel = current_menu_selected_row.load(std::memory_order_relaxed);
-                        if (hovered != sel) {
-                            dpad_steps.Reset();
-                            const int diff = hovered - sel;
-                            if (diff > 0) {
-                                for (int i = 0; i < diff; ++i) dpad_steps.Push(0x02u);  // DPAD_DOWN
-                            } else {
-                                for (int i = 0; i < -diff; ++i) dpad_steps.Push(0x01u);  // DPAD_UP
-                            }
-                            current_menu_selected_row.store(hovered, std::memory_order_relaxed);
+                // Check if the cursor entered a new menu item row
+                const int hovered = GetHoveredMenuRow(x, y, client_w, client_h);
+                if (hovered >= 0) {
+                    const int sel = current_menu_selected_row.load(std::memory_order_relaxed);
+                    if (hovered != sel) {
+                        dpad_steps.Reset();
+                        const int diff = hovered - sel;
+                        if (diff > 0) {
+                            dpad_steps.Push(0x02u);  // DPAD_DOWN
+                        } else if (diff < 0) {
+                            dpad_steps.Push(0x01u);  // DPAD_UP
                         }
-                    } else if (test_mode_override.load(std::memory_order_relaxed) > 0 || (flow_state != 1 && flow_state != 6)) {
-                        // In unit test mode or arbitrary menus without fixed row layout:
-                        // Step D-pad on relative mouse move
-                        move_accum_x += dx;
-                        move_accum_y += dy;
-                        if (std::abs(move_accum_y) >= kMenuMoveStepPixels && std::abs(move_accum_y) >= std::abs(move_accum_x)) {
-                            if (!dpad_steps.Busy()) {
-                                dpad_steps.Push(move_accum_y < 0 ? 0x01u : 0x02u, 1);
-                            }
-                            move_accum_x = 0;
-                            move_accum_y = 0;
-                        } else if (std::abs(move_accum_x) >= kMenuMoveStepPixels && std::abs(move_accum_x) > std::abs(move_accum_y)) {
-                            if (!dpad_steps.Busy()) {
-                                dpad_steps.Push(move_accum_x < 0 ? 0x04u : 0x08u, 1);
-                            }
-                            move_accum_x = 0;
-                            move_accum_y = 0;
-                        }
+                        current_menu_selected_row.store(hovered, std::memory_order_relaxed);
+                    }
+                } else if (test_mode_override.load(std::memory_order_relaxed) > 0) {
+                    // For synthetic unit tests: pulse D-pad on relative dy
+                    move_accum_y += dy;
+                    if (move_accum_y <= -kMenuMoveStepPixels) {
+                        dpad_steps.Push(0x01u);  // Up
+                        move_accum_y = 0;
+                    } else if (move_accum_y >= kMenuMoveStepPixels) {
+                        dpad_steps.Push(0x02u);  // Down
+                        move_accum_y = 0;
                     }
                 }
             } else if (window_focused.load(std::memory_order_relaxed)) {
@@ -621,11 +523,6 @@ void KeyboardPad(int port, input::Pad& pad) {
     if (port != 0) return;
     pad.connected = true;
 
-    if (settings_open.load(std::memory_order_relaxed)) {
-        // While in settings overlay, don't pass keyboard/mouse gameplay inputs
-        return;
-    }
-
     const bool in_menu = IsInMenuState();
     const int menu_flag = in_menu ? 1 : 0;
     if (last_polled_menu_state.exchange(menu_flag, std::memory_order_relaxed) != menu_flag) {
@@ -636,18 +533,10 @@ void KeyboardPad(int port, input::Pad& pad) {
 
     const uint32_t flow_state = GetGameFlowState();
     if (last_menu_flow_state.exchange(flow_state, std::memory_order_relaxed) != flow_state) {
-        // Reset selected row whenever menu state transitions
         current_menu_selected_row.store(0, std::memory_order_relaxed);
-        last_known_hover_row.store(-1, std::memory_order_relaxed);
     }
 
-    // If native game entered the Options screen, automatically activate the PC Settings UI
-    if (in_menu && IsCurrentScreenOptions() && !settings_open.load(std::memory_order_relaxed)) {
-        SetSettingsOpen(true);
-        return;
-    }
-
-    // Keyboard navigation in menu tracking
+    // Keyboard navigation tracking in menus
     if (in_menu) {
         if (Down(VK_UP)) {
             int cur = current_menu_selected_row.load(std::memory_order_relaxed);
@@ -655,19 +544,11 @@ void KeyboardPad(int port, input::Pad& pad) {
         }
         if (Down(VK_DOWN)) {
             int cur = current_menu_selected_row.load(std::memory_order_relaxed);
-            int max_row = (flow_state == 6) ? 5 : 3;
-            if (cur < max_row) current_menu_selected_row.store(cur + 1, std::memory_order_relaxed);
-        }
-        if (Down(VK_RETURN) || Down(VK_SPACE)) {
-            int cur = current_menu_selected_row.load(std::memory_order_relaxed);
-            if ((flow_state == 6 && cur == 3) || (flow_state == 1 && cur == 2)) {
-                SetSettingsOpen(true);
-                return;
-            }
+            if (cur < 5) current_menu_selected_row.store(cur + 1, std::memory_order_relaxed);
         }
     }
 
-    // Strictly one keybind per action:
+    // Single keybind per action:
     // D-pad: Arrow keys (Up / Down / Left / Right)
     // Start (Menu / Pause): Esc
     // Back (Map / Objectives): Tab
@@ -682,8 +563,8 @@ void KeyboardPad(int port, input::Pad& pad) {
     if (Down('C')) pad.buttons |= 0x40u;
     if (Down('V')) pad.buttons |= 0x80u;
 
-    // Analog buttons (0-255), one keybind each:
-    // [0] A (Jump / Charge Jump / Select): Space
+    // Analog buttons (0-255):
+    // [0] A (Jump / Charge Jump / Select): Space / Enter
     // [1] B (Grab / Pick Up / Throw / Back): Q
     // [2] X (Punch / Attack): Left Click (in gameplay)
     // [3] Y (Critical Mass / Ground Slam / Special): E
@@ -691,7 +572,7 @@ void KeyboardPad(int port, input::Pad& pad) {
     // [5] White (Cycle Target): 1
     // [6] Left Trigger (Target Lock-On / Guard): Right Click (in gameplay)
     // [7] Right Trigger (Sprint / Wall Run / Dodge): Left Shift
-    if (Down(VK_SPACE)) pad.analog[0] = 255;
+    if (Down(VK_SPACE) || Down(VK_RETURN)) pad.analog[0] = 255;
     if (Down('Q')) pad.analog[1] = 255;
     if (Down('E')) pad.analog[3] = 255;
     if (Down('2')) pad.analog[4] = 255;
@@ -712,7 +593,10 @@ void KeyboardPad(int port, input::Pad& pad) {
         const bool right_pressed = mouse_right.Sample(now);
 
         if (in_menu) {
-            // In menus: Left Click = A (Select), Right Click = B (Back), Wheel/Move = D-Pad
+            // In menus:
+            // Left Click = Button A (Select)
+            // Right Click = Button B (Back)
+            // Mouse Wheel & Cursor Move = D-Pad navigation
             if (left_pressed) pad.analog[0] = 255;
             if (right_pressed) pad.analog[1] = 255;
             pad.buttons |= dpad_steps.Sample(now);
@@ -720,7 +604,10 @@ void KeyboardPad(int port, input::Pad& pad) {
             look_dy = 0.0f;
             has_raw_delta = false;
         } else {
-            // In gameplay: Left Click = X (Punch), Right Click = LT (Lock-On), Mouse Move = Right Stick Camera
+            // In gameplay:
+            // Left Click = Button X (Punch)
+            // Right Click = Left Trigger (Lock-On / Guard)
+            // Mouse Move = Camera Look (Right Analog Stick)
             if (left_pressed) pad.analog[2] = 255;
             if (right_pressed) pad.analog[6] = 255;
 
