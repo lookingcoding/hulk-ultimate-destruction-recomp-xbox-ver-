@@ -1,4 +1,4 @@
-﻿#include "common/settings_ui.h"
+#include "common/settings_ui.h"
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -110,45 +110,60 @@ void SaveCustomSettings(void* table_ptr) {
 }
 
 void DrawSettingsUi(double fps) {
+    // Check if the Options menu should be active
     const bool is_open = IsSettingsOpen();
-
-    // When the menu is closed, show a subtle prompt in the top-right corner
     if (!is_open) {
-        ImGuiIO& io = ImGui::GetIO();
-        ImVec2 badge_pos(io.DisplaySize.x - 10.0f, 10.0f);
-        ImGui::SetNextWindowPos(badge_pos, ImGuiCond_Always, ImVec2(1.0f, 0.0f));
-        ImGui::SetNextWindowBgAlpha(0.40f);
-        ImGuiWindowFlags badge_flags = ImGuiWindowFlags_NoDecoration |
-                                       ImGuiWindowFlags_AlwaysAutoResize |
-                                       ImGuiWindowFlags_NoSavedSettings |
-                                       ImGuiWindowFlags_NoFocusOnAppearing |
-                                       ImGuiWindowFlags_NoNav |
-                                       ImGuiWindowFlags_NoMove;
-        if (ImGui::Begin("##QuickPrompt", nullptr, badge_flags)) {
-            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "[F1] or [~] PC Graphics & Controls");
-            ImGui::SameLine();
-            ImGui::TextDisabled("| FPS: %.1f", fps);
-        }
-        ImGui::End();
         return;
     }
 
-    // Main Settings Modal
     ImGuiIO& io = ImGui::GetIO();
-    ImGui::SetNextWindowSize(ImVec2(680, 520), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
-                            ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
 
-    bool open_state = true;
-    ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse;
-    if (ImGui::Begin("Hulk Recompiled - PC Settings & Graphics", &open_state, flags)) {
+    // Full-screen Options menu presentation matching the native game experience
+    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+    ImGui::SetNextWindowSize(io.DisplaySize);
+
+    ImGuiWindowFlags bg_flags = ImGuiWindowFlags_NoDecoration |
+                                ImGuiWindowFlags_NoMove |
+                                ImGuiWindowFlags_NoResize |
+                                ImGuiWindowFlags_NoSavedSettings |
+                                ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.05f, 0.07f, 0.09f, 0.94f));
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.12f, 0.35f, 0.20f, 0.85f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.18f, 0.50f, 0.28f, 0.95f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.22f, 0.65f, 0.35f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.14f, 0.38f, 0.22f, 0.90f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.20f, 0.55f, 0.32f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.26f, 0.72f, 0.40f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_Tab, ImVec4(0.10f, 0.24f, 0.16f, 0.90f));
+    ImGui::PushStyleColor(ImGuiCol_TabHovered, ImVec4(0.18f, 0.50f, 0.30f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_TabActive, ImVec4(0.16f, 0.46f, 0.26f, 1.00f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(32.0f, 28.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 4.0f);
+
+    if (ImGui::Begin("##GameOptionsMenu", nullptr, bg_flags)) {
         app::Settings& s = app::Get();
 
-        if (ImGui::BeginTabBar("SettingsTabs")) {
+        // Header Title Banner
+        ImGui::TextColored(ImVec4(0.85f, 0.90f, 0.88f, 1.0f), "THE INCREDIBLE HULK: ULTIMATE DESTRUCTION");
+        ImGui::SameLine();
+        ImGui::TextDisabled("| Performance: %.1f FPS", fps);
+
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.24f, 0.88f, 0.48f, 1.0f));
+        ImGui::SetWindowFontScale(1.4f);
+        ImGui::Text("OPTIONS & PC SETTINGS");
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::PopStyleColor();
+
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::BeginTabBar("OptionsTabs", ImGuiTabBarFlags_None)) {
             // TAB 1: Display & Resolution
-            if (ImGui::BeginTabItem("Display & Resolution")) {
+            if (ImGui::BeginTabItem("DISPLAY & RESOLUTION")) {
                 ImGui::Spacing();
-                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.4f, 1.0f), "Display Configuration");
+                ImGui::TextColored(ImVec4(0.24f, 0.88f, 0.48f, 1.0f), "Display Configuration");
                 ImGui::Separator();
 
                 // Display Mode
@@ -157,7 +172,7 @@ void DrawSettingsUi(double fps) {
                 if (ImGui::Combo("Display Mode", &current_mode, display_modes, IM_ARRAYSIZE(display_modes))) {
                     s.display_mode = static_cast<app::DisplayMode>(current_mode);
                 }
-                ImGui::TextDisabled("Borderless Fullscreen is recommended for seamless alt-tabbing on Windows 10/11.");
+                ImGui::TextDisabled("Borderless Fullscreen allows smooth, instant alt-tabbing to desktop without display mode flicker.");
 
                 ImGui::Spacing();
                 ImGui::Separator();
@@ -198,25 +213,23 @@ void DrawSettingsUi(double fps) {
 
                 app::Mode current_out = app::Output();
                 app::Mode desktop = app::Desktop();
-                ImGui::Text("Current Output: %u x %u (Aspect %s) | Desktop: %u x %u",
+                ImGui::Text("Current Output: %u x %u (Aspect %s) | Desktop Native: %u x %u",
                             current_out.width, current_out.height,
                             app::Widescreen() ? "16:9 Widescreen" : "4:3 Standard",
                             desktop.width, desktop.height);
 
                 ImGui::Spacing();
-                if (ImGui::Button("Apply Display Changes Now", ImVec2(220, 32))) {
+                if (ImGui::Button("Apply Display Changes Now", ImVec2(240, 36))) {
                     app::ApplyDisplay();
                 }
-                ImGui::SameLine();
-                ImGui::TextDisabled("(Applies resolution and fullscreen mode immediately)");
 
                 ImGui::EndTabItem();
             }
 
-            // TAB 2: Graphics & Rendering Quality
-            if (ImGui::BeginTabItem("Graphics Quality")) {
+            // TAB 2: Graphics Quality
+            if (ImGui::BeginTabItem("GRAPHICS QUALITY")) {
                 ImGui::Spacing();
-                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.4f, 1.0f), "Rendering & Performance");
+                ImGui::TextColored(ImVec4(0.24f, 0.88f, 0.48f, 1.0f), "Rendering & Enhancement");
                 ImGui::Separator();
 
                 // 3D Render Scale (Supersampling)
@@ -225,11 +238,11 @@ void DrawSettingsUi(double fps) {
                     s.render_percent = static_cast<uint32_t>(render_scale);
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("100%")) s.render_percent = 100;
+                if (ImGui::Button("100% Native")) s.render_percent = 100;
                 ImGui::SameLine();
-                if (ImGui::Button("150%")) s.render_percent = 150;
+                if (ImGui::Button("150% Super")) s.render_percent = 150;
                 ImGui::SameLine();
-                if (ImGui::Button("200%")) s.render_percent = 200;
+                if (ImGui::Button("200% Ultra 4K")) s.render_percent = 200;
 
                 ImGui::TextDisabled("Scales the internal 3D scene resolution. Values above 100%% provide pristine supersampled antialiasing.");
 
@@ -255,20 +268,15 @@ void DrawSettingsUi(double fps) {
                 if (ImGui::Combo("Anisotropic Texture Filtering", &aniso_idx, aniso_options, IM_ARRAYSIZE(aniso_options))) {
                     s.aniso = IndexToAniso(aniso_idx);
                 }
-                ImGui::TextDisabled("Sharpens textures viewed at oblique angles on pavement, walls, and roads.");
-
-                ImGui::Spacing();
-                if (ImGui::Button("Save Graphics Settings", ImVec2(200, 32))) {
-                    app::Save();
-                }
+                ImGui::TextDisabled("Sharpens textures viewed at oblique angles on streets, walls, and distant buildings.");
 
                 ImGui::EndTabItem();
             }
 
-            // TAB 3: Mouse & Camera Controls
-            if (ImGui::BeginTabItem("Mouse & Camera")) {
+            // TAB 3: Mouse & Controls
+            if (ImGui::BeginTabItem("MOUSE & CONTROLS")) {
                 ImGui::Spacing();
-                ImGui::TextColored(ImVec4(0.2f, 0.9f, 0.4f, 1.0f), "Native PC Mouse Camera Overhaul");
+                ImGui::TextColored(ImVec4(0.24f, 0.88f, 0.48f, 1.0f), "Mouse Input & Camera Control");
                 ImGui::Separator();
 
                 float sens = GetMouseSensitivity();
@@ -276,7 +284,7 @@ void DrawSettingsUi(double fps) {
                     SetMouseSensitivity(sens);
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("Reset##Sens")) SetMouseSensitivity(1.0f);
+                if (ImGui::Button("Reset to Default")) SetMouseSensitivity(1.0f);
 
                 bool invert_y = GetMouseInvertY();
                 if (ImGui::Checkbox("Invert Vertical Look (Invert Y)", &invert_y)) {
@@ -288,19 +296,19 @@ void DrawSettingsUi(double fps) {
                     SetMouseSmoothing(smoothing);
                 }
                 if (!smoothing) {
-                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "[Active: 1:1 Instant Stop]");
-                    ImGui::TextDisabled("Camera stops rotating the exact microsecond your mouse stops moving. True PC feel.");
+                    ImGui::TextColored(ImVec4(0.35f, 0.90f, 0.45f, 1.0f), "[Active: 1:1 Instant Stop - True PC Native]");
+                    ImGui::TextDisabled("Camera stops rotating the exact microsecond your mouse stops moving. Unfiltered 1:1 response.");
                 } else {
-                    ImGui::TextColored(ImVec4(0.9f, 0.8f, 0.3f, 1.0f), "[Active: Gentle Smoothing Filter]");
+                    ImGui::TextColored(ImVec4(0.92f, 0.82f, 0.35f, 1.0f), "[Active: Gentle Smoothing Filter]");
                     ImGui::TextDisabled("Slight 1-frame deceleration filter enabled.");
                 }
 
                 ImGui::Spacing();
                 ImGui::Separator();
-                ImGui::Text("Features:");
-                ImGui::BulletText("Windows Raw Input: 100%% unaccelerated, high-resolution mouse sensor input.");
-                ImGui::BulletText("Dynamic Deadzone Blending: Smooth micro-aiming without jerky threshold jumps.");
-                ImGui::BulletText("Automatic Cursor Lock: Mouse stays locked in gameplay and is freed in menus.");
+                ImGui::TextColored(ImVec4(0.85f, 0.90f, 0.88f, 1.0f), "Mouse Integration Status:");
+                ImGui::BulletText("Windows Raw Input: 100%% direct, unaccelerated mouse sensor input.");
+                ImGui::BulletText("Menu Direct Hit-Testing: Mouse clicks and highlights align directly with menu items.");
+                ImGui::BulletText("Automatic Cursor Lock: Mouse is captured during gameplay and freed in menus.");
 
                 ImGui::EndTabItem();
             }
@@ -309,25 +317,26 @@ void DrawSettingsUi(double fps) {
 
         ImGui::Spacing();
         ImGui::Separator();
+        ImGui::Spacing();
 
         // Footer Action Bar
-        if (ImGui::Button("Save & Close (F1)", ImVec2(160, 34))) {
+        if (ImGui::Button("SAVE & APPLY", ImVec2(180, 38))) {
             app::ApplyDisplay();
             app::Save();
             SetSettingsOpen(false);
         }
         ImGui::SameLine();
-        if (ImGui::Button("Close (Esc)", ImVec2(120, 34))) {
+        if (ImGui::Button("BACK TO GAME / MENU", ImVec2(200, 38))) {
+            app::Save();
             SetSettingsOpen(false);
         }
         ImGui::SameLine();
-        ImGui::TextDisabled("Press F1 or [~] to toggle this menu anytime.");
+        ImGui::TextDisabled("Press [ESC] or Right-Click anytime to return to previous menu.");
     }
     ImGui::End();
 
-    if (!open_state) {
-        SetSettingsOpen(false);
-    }
+    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor(10);
 }
 
 }  // namespace hulk

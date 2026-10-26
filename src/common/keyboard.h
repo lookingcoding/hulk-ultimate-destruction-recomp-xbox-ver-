@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <cstdint>
 namespace input { struct Pad; }
 namespace hulk {
@@ -16,8 +16,9 @@ bool GetMouseInvertY();
 void SetMouseSmoothing(bool smoothing);
 bool GetMouseSmoothing();
 
-// Settings overlay state
+// Settings / Options menu state
 bool IsSettingsOpen();
 void SetSettingsOpen(bool open);
 void ToggleSettings();
+bool IsCurrentScreenOptions();
 }

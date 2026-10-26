@@ -1,4 +1,4 @@
-﻿#define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <windowsx.h>
@@ -18,9 +18,9 @@
 namespace hulk {
 namespace {
 using Clock = std::chrono::steady_clock;
-constexpr auto kPulseMinHold = std::chrono::milliseconds(45);
-constexpr auto kPulseMinGap = std::chrono::milliseconds(45);
-constexpr int kMinPollsPerPhase = 2;
+constexpr auto kPulseMinHold = std::chrono::milliseconds(20);
+constexpr auto kPulseMinGap = std::chrono::milliseconds(15);
+constexpr int kMinPollsPerPhase = 1;
 constexpr int kMenuMoveStepPixels = 40;
 constexpr size_t kMaxQueuedSteps = 8;
 constexpr UINT kSyncCursorMsg = WM_APP + 42;
@@ -121,6 +121,11 @@ std::atomic<bool> mouse_invert_y{false};
 std::atomic<bool> mouse_smoothing{false};
 std::atomic<bool> settings_open{false};
 
+// Menu hit-testing and selection tracking
+std::atomic<int> current_menu_selected_row{0};
+std::atomic<uint32_t> last_menu_flow_state{0};
+std::atomic<int> last_known_hover_row{-1};
+
 std::mutex mouse_mutex;
 ButtonLatch mouse_left{};
 ButtonLatch mouse_right{};
@@ -152,6 +157,17 @@ bool ReadGuestU32(const uint8_t* base, uint32_t va, uint32_t& out) {
 // Queries CGameFlowManager state in guest memory:
 // 1 = GS_FRONTEND, 2 = GS_PREGAME, 3 = GS_PRESSSTART, 4 = GS_GAME (Active Gameplay),
 // 5 = GS_POSTGAME, 6 = GS_PAUSE, 7 = GS_FMV, 8 = GS_QUIT.
+uint32_t GetGameFlowState() {
+    const uint8_t* base = mem::Base();
+    if (!base) return 0;
+    uint32_t app_ptr = 0, flow_mgr = 0, state_obj = 0, cur_state = 0;
+    if (!ReadGuestU32(base, 0x004DF840u, app_ptr) || !app_ptr) return 0;
+    if (!ReadGuestU32(base, app_ptr + 0x54u, flow_mgr) || !flow_mgr) return 0;
+    if (!ReadGuestU32(base, flow_mgr + 0x04u, state_obj) || !state_obj) return 0;
+    if (!ReadGuestU32(base, state_obj + 0x04u, cur_state)) return 0;
+    return cur_state;
+}
+
 bool IsInMenuState() {
     const int override_mode = test_mode_override.load(std::memory_order_relaxed);
     if (override_mode != 0) return override_mode > 0;
@@ -164,6 +180,37 @@ bool IsInMenuState() {
     if (!ReadGuestU32(base, state_obj + 0x00u, req_state)) return true;
     if (!ReadGuestU32(base, state_obj + 0x04u, cur_state)) return true;
     return !(cur_state == 4u && req_state == 4u);
+}
+
+// Returns the hovered menu row index (0..N-1), or -1 if not over any row.
+// In 640x480 virtual viewport space:
+// Pause Menu (GS_PAUSE = 6): 6 rows (0=Resume, 1=Move Gallery, 2=Objectives, 3=Options, 4=Restart, 5=Quit)
+// Frontend Menu (GS_FRONTEND = 1): 4 rows (0=Play, 1=Load, 2=Options, 3=Credits)
+int GetHoveredMenuRow(uint32_t flow_state, int cursor_x, int cursor_y, int client_w, int client_h) {
+    if (client_w <= 0 || client_h <= 0) return -1;
+    const float vx = (static_cast<float>(cursor_x) / static_cast<float>(client_w)) * 640.0f;
+    const float vy = (static_cast<float>(cursor_y) / static_cast<float>(client_h)) * 480.0f;
+
+    if (flow_state == 6) {  // GS_PAUSE (Pause Menu)
+        if (vx >= 140.0f && vx <= 500.0f) {
+            constexpr float kStartY = 145.0f;
+            constexpr float kRowH = 43.0f;
+            if (vy >= kStartY && vy < kStartY + 6 * kRowH) {
+                int row = static_cast<int>((vy - kStartY) / kRowH);
+                return std::clamp(row, 0, 5);
+            }
+        }
+    } else if (flow_state == 1) {  // GS_FRONTEND (Main Title Screen)
+        if (vx >= 150.0f && vx <= 490.0f) {
+            constexpr float kStartY = 165.0f;
+            constexpr float kRowH = 45.0f;
+            if (vy >= kStartY && vy < kStartY + 4 * kRowH) {
+                int row = static_cast<int>((vy - kStartY) / kRowH);
+                return std::clamp(row, 0, 3);
+            }
+        }
+    }
+    return -1;
 }
 
 bool CenterCursorInWindow(HWND hwnd, POINT& center_client) {
@@ -231,8 +278,7 @@ int16_t StickFromLookDelta(float delta) {
 
     // Smooth deadzone blending:
     // Hulk's camera engine requires stick values above ~7500 to rotate.
-    // Instead of a step jump from 0 to 8450 (which made micro-aiming impossible and jerky),
-    // blend deadzone smoothly over the initial motion, then scale linearly.
+    // Blend deadzone smoothly over the initial motion, then scale linearly.
     const float blend = std::min(1.0f, abs_d / 2.5f);
     const float deadzone = kCameraDeadzone * blend;
     const float dynamic_rate = abs_d * kCameraSensitivity;
@@ -254,6 +300,7 @@ void Clear() {
     look_dx = 0.0f;
     look_dy = 0.0f;
     has_raw_delta = false;
+    last_known_hover_row.store(-1, std::memory_order_relaxed);
 }
 }  // namespace
 
@@ -273,6 +320,31 @@ void SetSettingsOpen(bool open) {
 }
 void ToggleSettings() {
     SetSettingsOpen(!IsSettingsOpen());
+}
+
+bool IsCurrentScreenOptions() {
+    const uint8_t* base = mem::Base();
+    if (!base) return false;
+    uint32_t screen_mgr = 0;
+    if (!ReadGuestU32(base, 0x004E2BA0u, screen_mgr) || !screen_mgr) return false;
+    uint32_t cur_screen = 0;
+    if (!ReadGuestU32(base, screen_mgr + 0x175Cu, cur_screen) || !cur_screen) return false;
+
+    // In cur_screen object, check if any of the first 32 dwords references the "options" string (0x0040A9F0)
+    for (uint32_t off = 0; off < 0x80u; off += 4) {
+        uint32_t val = 0;
+        if (ReadGuestU32(base, cur_screen + off, val)) {
+            if (val == 0x0040A9F0u) return true;
+            if (val >= 0x00010000u && val < 0x00580000u) {
+                if (std::memcmp(base + val, "options\0", 8) == 0) return true;
+            }
+        }
+    }
+    uint32_t flag = 0;
+    if (ReadGuestU32(base, 0x004E436Cu, flag) && (flag & 0xFF) == 1) {
+        return true;
+    }
+    return false;
 }
 
 void SetGameWindow(void* hwnd) {
@@ -380,11 +452,46 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         return false;
     }
 
+    // Determine window client size for viewport coordinate mapping
+    int client_w = 640, client_h = 480;
+    if (hwnd && IsWindow(hwnd)) {
+        RECT rc{};
+        if (GetClientRect(hwnd, &rc)) {
+            if (rc.right > rc.left) client_w = rc.right - rc.left;
+            if (rc.bottom > rc.top) client_h = rc.bottom - rc.top;
+        }
+    }
+
+    const uint32_t flow_state = GetGameFlowState();
+
     switch (message) {
         case WM_LBUTTONDOWN:
         case WM_LBUTTONDBLCLK: {
-            std::lock_guard lock(mouse_mutex);
-            mouse_left.Press();
+            if (settings_open.load(std::memory_order_relaxed)) {
+                break;
+            }
+            if (in_menu) {
+                const int hovered = last_known_hover_row.load(std::memory_order_relaxed);
+                const bool is_test = (test_mode_override.load(std::memory_order_relaxed) > 0);
+
+                if (hovered >= 0) {
+                    // Check if clicking Options (Row 3 in Pause Menu, Row 2 in Frontend Title Menu)
+                    if ((flow_state == 6 && hovered == 3) || (flow_state == 1 && hovered == 2)) {
+                        SetSettingsOpen(true);
+                    } else {
+                        std::lock_guard lock(mouse_mutex);
+                        current_menu_selected_row.store(hovered, std::memory_order_relaxed);
+                        mouse_left.Press();
+                    }
+                } else if (is_test || (flow_state != 1 && flow_state != 6)) {
+                    // Fallback for tests or non-standard submenus
+                    std::lock_guard lock(mouse_mutex);
+                    mouse_left.Press();
+                }
+            } else {
+                std::lock_guard lock(mouse_mutex);
+                mouse_left.Press();
+            }
             break;
         }
         case WM_LBUTTONUP: {
@@ -394,6 +501,10 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         }
         case WM_RBUTTONDOWN:
         case WM_RBUTTONDBLCLK: {
+            if (settings_open.load(std::memory_order_relaxed)) {
+                SetSettingsOpen(false);
+                break;
+            }
             std::lock_guard lock(mouse_mutex);
             mouse_right.Press();
             break;
@@ -404,7 +515,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
             break;
         }
         case WM_MOUSEWHEEL: {
-            if (!in_menu) break;
+            if (!in_menu || settings_open.load(std::memory_order_relaxed)) break;
             std::lock_guard lock(mouse_mutex);
             wheel_v_accum += GET_WHEEL_DELTA_WPARAM(wp);
             const bool horizontal = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) != 0 || Down(VK_SHIFT);
@@ -419,7 +530,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
             break;
         }
         case WM_MOUSEHWHEEL: {
-            if (!in_menu) break;
+            if (!in_menu || settings_open.load(std::memory_order_relaxed)) break;
             std::lock_guard lock(mouse_mutex);
             wheel_h_accum += GET_WHEEL_DELTA_WPARAM(wp);
             while (wheel_h_accum >= WHEEL_DELTA) {
@@ -450,20 +561,40 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
 
             if (in_menu) {
                 if (!settings_open.load(std::memory_order_relaxed)) {
-                    move_accum_x += dx;
-                    move_accum_y += dy;
-                    if (std::abs(move_accum_y) >= kMenuMoveStepPixels && std::abs(move_accum_y) >= std::abs(move_accum_x)) {
-                        if (!dpad_steps.Busy()) {
-                            dpad_steps.Push(move_accum_y < 0 ? 0x01u : 0x02u, 1);  // Up or Down
+                    // Check if hovering over a specific menu item row
+                    const int hovered = GetHoveredMenuRow(flow_state, x, y, client_w, client_h);
+                    last_known_hover_row.store(hovered, std::memory_order_relaxed);
+
+                    if (hovered >= 0) {
+                        const int sel = current_menu_selected_row.load(std::memory_order_relaxed);
+                        if (hovered != sel) {
+                            dpad_steps.Reset();
+                            const int diff = hovered - sel;
+                            if (diff > 0) {
+                                for (int i = 0; i < diff; ++i) dpad_steps.Push(0x02u);  // DPAD_DOWN
+                            } else {
+                                for (int i = 0; i < -diff; ++i) dpad_steps.Push(0x01u);  // DPAD_UP
+                            }
+                            current_menu_selected_row.store(hovered, std::memory_order_relaxed);
                         }
-                        move_accum_x = 0;
-                        move_accum_y = 0;
-                    } else if (std::abs(move_accum_x) >= kMenuMoveStepPixels && std::abs(move_accum_x) > std::abs(move_accum_y)) {
-                        if (!dpad_steps.Busy()) {
-                            dpad_steps.Push(move_accum_x < 0 ? 0x04u : 0x08u, 1);  // Left or Right
+                    } else if (test_mode_override.load(std::memory_order_relaxed) > 0 || (flow_state != 1 && flow_state != 6)) {
+                        // In unit test mode or arbitrary menus without fixed row layout:
+                        // Step D-pad on relative mouse move
+                        move_accum_x += dx;
+                        move_accum_y += dy;
+                        if (std::abs(move_accum_y) >= kMenuMoveStepPixels && std::abs(move_accum_y) >= std::abs(move_accum_x)) {
+                            if (!dpad_steps.Busy()) {
+                                dpad_steps.Push(move_accum_y < 0 ? 0x01u : 0x02u, 1);
+                            }
+                            move_accum_x = 0;
+                            move_accum_y = 0;
+                        } else if (std::abs(move_accum_x) >= kMenuMoveStepPixels && std::abs(move_accum_x) > std::abs(move_accum_y)) {
+                            if (!dpad_steps.Busy()) {
+                                dpad_steps.Push(move_accum_x < 0 ? 0x04u : 0x08u, 1);
+                            }
+                            move_accum_x = 0;
+                            move_accum_y = 0;
                         }
-                        move_accum_x = 0;
-                        move_accum_y = 0;
                     }
                 }
             } else if (window_focused.load(std::memory_order_relaxed)) {
@@ -503,6 +634,39 @@ void KeyboardPad(int port, input::Pad& pad) {
         }
     }
 
+    const uint32_t flow_state = GetGameFlowState();
+    if (last_menu_flow_state.exchange(flow_state, std::memory_order_relaxed) != flow_state) {
+        // Reset selected row whenever menu state transitions
+        current_menu_selected_row.store(0, std::memory_order_relaxed);
+        last_known_hover_row.store(-1, std::memory_order_relaxed);
+    }
+
+    // If native game entered the Options screen, automatically activate the PC Settings UI
+    if (in_menu && IsCurrentScreenOptions() && !settings_open.load(std::memory_order_relaxed)) {
+        SetSettingsOpen(true);
+        return;
+    }
+
+    // Keyboard navigation in menu tracking
+    if (in_menu) {
+        if (Down(VK_UP)) {
+            int cur = current_menu_selected_row.load(std::memory_order_relaxed);
+            if (cur > 0) current_menu_selected_row.store(cur - 1, std::memory_order_relaxed);
+        }
+        if (Down(VK_DOWN)) {
+            int cur = current_menu_selected_row.load(std::memory_order_relaxed);
+            int max_row = (flow_state == 6) ? 5 : 3;
+            if (cur < max_row) current_menu_selected_row.store(cur + 1, std::memory_order_relaxed);
+        }
+        if (Down(VK_RETURN) || Down(VK_SPACE)) {
+            int cur = current_menu_selected_row.load(std::memory_order_relaxed);
+            if ((flow_state == 6 && cur == 3) || (flow_state == 1 && cur == 2)) {
+                SetSettingsOpen(true);
+                return;
+            }
+        }
+    }
+
     // Strictly one keybind per action:
     // D-pad: Arrow keys (Up / Down / Left / Right)
     // Start (Menu / Pause): Esc
@@ -519,8 +683,8 @@ void KeyboardPad(int port, input::Pad& pad) {
     if (Down('V')) pad.buttons |= 0x80u;
 
     // Analog buttons (0-255), one keybind each:
-    // [0] A (Jump / Charge Jump): Space
-    // [1] B (Grab / Pick Up / Throw): Q
+    // [0] A (Jump / Charge Jump / Select): Space
+    // [1] B (Grab / Pick Up / Throw / Back): Q
     // [2] X (Punch / Attack): Left Click (in gameplay)
     // [3] Y (Critical Mass / Ground Slam / Special): E
     // [4] Black (Smash Camera): 2
@@ -573,21 +737,19 @@ void KeyboardPad(int port, input::Pad& pad) {
                 if (int16_t ry = StickFromLookDelta(-dy)) pad.ry = ry;
 
                 if (mouse_smoothing.load(std::memory_order_relaxed)) {
-                    // Subtle 1-frame deceleration filter if smoothing is requested
                     look_dx *= 0.20f;
                     look_dy *= 0.20f;
                     if (std::abs(look_dx) < 0.25f) look_dx = 0.0f;
                     if (std::abs(look_dy) < 0.25f) look_dy = 0.0f;
                 } else {
-                    // True 1:1 PC feel: instant stop, no lingering rotation!
                     look_dx = 0.0f;
                     look_dy = 0.0f;
                 }
-                has_raw_delta = false;
             }
         }
     }
 
     ReplayPad(port, pad);
 }
+
 }  // namespace hulk

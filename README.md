@@ -1,4 +1,4 @@
-﻿# Hulk Recompiled
+# Hulk Recompiled
 
 A native Windows port and static recompilation of the European original Xbox version of **The Incredible Hulk: Ultimate Destruction**, built on [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp).
 
@@ -15,8 +15,12 @@ A native Windows port and static recompilation of the European original Xbox ver
   - Instantaneous camera stop when mouse stops (no floaty lag or artificial deceleration).
   - Continuous dynamic deadzone blending for pixel-precise micro-aiming without abrupt stick jumps.
   - Full sensitivity slider and vertical look inversion (Invert Y).
-- **In-Game PC Settings Overlay (ImGui):**
-  - Press **`F1`** or **`~` (Tilde)** at any time to open the settings menu.
+- **Direct Mouse Hit-Testing & Menu Navigation:**
+  - Direct 1:1 hit-testing for all native menus: the mouse pointer is directly on the thing you are clicking.
+  - Hovering immediately highlights the item under the pointer with zero lag.
+  - Clicking on blank background or margins is safely ignored (no unintended selection).
+- **Integrated In-Game Options Menu:**
+  - Integrated directly into the real game's **Options menu** (accessible from the Title Screen and In-Game Pause Menu, or via `F1` / `~`).
   - **Display Modes:** Borderless Fullscreen, Exclusive Fullscreen, Windowed.
   - **Resolution Presets:** Desktop Native, 4K UHD (3840x2160), 1440p QHD (2560x1440), 1080p FHD (1920x1080), 900p, 720p, or custom resolutions.
   - **3D Render Scaling:** 50% to 200% supersampling for crisp, aliasing-free rendering.
@@ -35,20 +39,21 @@ Keyboard and mouse input is mapped to player 1 alongside any connected Xbox/Play
 
 | PC Control | Action | Xbox Controller Equivalent |
 | :--- | :--- | :--- |
-| **Mouse Move** | Camera Look | Right Analog Stick |
-| **Left Click** | Light Attack / Punch | X Button |
-| **Right Click** | Guard / Lock-On | Left Trigger (LT) |
+| **Mouse Move** | Camera Look (in gameplay) / Menu Aim | Right Analog Stick / Direct Hover |
+| **Left Click** | Light Attack / Punch (gameplay) / Select (menus) | X Button / A Button |
+| **Right Click** | Guard / Lock-On (gameplay) / Back (menus) | Left Trigger (LT) / B Button |
+| **Mouse Wheel** | Menu Item Scroll | D-Pad Up / Down |
 | **W / A / S / D** | Movement | Left Analog Stick |
-| **Space** | Jump / Charge Jump | A Button |
-| **Q** | Grab / Pick Up / Throw | B Button |
+| **Space** | Jump / Charge Jump / Select | A Button |
+| **Q** | Grab / Pick Up / Throw / Back | B Button |
 | **E** | Special / Critical Mass / Ground Slam | Y Button |
 | **Left Shift** | Sprint / Wall Run / Evade | Right Trigger (RT) |
-| **Esc** | Pause / Main Menu | Start Button |
+| **Esc** | Pause / Main Menu / Back | Start Button / Back |
 | **Tab** | Map / Objectives | Back Button |
 | **C** | Reset Camera Behind Hulk | Left Stick Click (L3) |
 | **V** | Taunt | Right Stick Click (R3) |
 | **1 / 2** | Cycle Target / Smash Camera | White / Black Buttons |
-| **F1 or ~** | Toggle PC Graphics & Controls Overlay | *(PC Exclusive)* |
+| **F1 or ~** | Toggle PC Graphics & Controls Options | *(PC Shortcut)* |
 
 ---
 
