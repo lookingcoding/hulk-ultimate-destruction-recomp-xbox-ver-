@@ -13,23 +13,20 @@ void OnWindowReady(void* hwnd) {
 const app::GameInfo app::kGame = {
     .title = L"The Incredible Hulk: Ultimate Destruction",               // window and splash
     .short_title = L"Hulk Recompiled",               // message boxes
-    .name = L"HulkRecompiled",                      // window class, crash dumps
-    .log = "hulk",                                   // release/logs/hulk.log beside the exe
-    .settings = "settings.toml",                     // default settings next to the exe
-    .splash = L"assets/splash.png",
-    .missing = L"Please provide either the retail disc image or the extracted game files in the assets directory.\n\n"
-               L"Supported disc files:\n"
-               L"  assets/Incredible Hulk, The - Ultimate Destruction.iso\n"
-               L"  assets/default.xbe and game data archives\n",
-    .images = {{"default.xbe", "HulkRecompiled.dll"}},
-    .options = {},
-    .load = hulk::LoadCustomSettings,     // load settings from settings.toml
-    .save = hulk::SaveCustomSettings,     // save settings to settings.toml
-    .init = nullptr,                      // before any guest code runs
-    .loaded = nullptr,                    // image in memory, before its entry point runs
-    .window = OnWindowReady,              // the game window is up
+    .name = L"Hulk Recompiled",                      // window classes, crash dumps, handover event
+    .log = "hulk",                                   // log file prefix
+    .settings = "settings.toml",                     // settings file beside the exe
+    .splash = L"splash",                             // optional splash.png or splash.bmp beside the exe
+    .missing = L"Put the game in the assets folder: its disc image (.iso), or default.xbe with its folders beside it.",
+    .images = {{"default.xbe", "HulkRecompiled"}},   // each recompiled xbe and its exe, for title launches
+    .options = {},                                   // game settings kept in the settings file
+    .load = hulk::LoadCustomSettings,                // reads more from the settings file's toml::table
+    .save = hulk::SaveCustomSettings,                // writes more into it
+    .init = hulk::InitDiagnostics,
+    .loaded = nullptr,                               // image in memory, before its entry point runs
+    .window = OnWindowReady,                         // the game window is up
     .message = hulk::KeyboardMessage,
-    .ui = hulk::DrawNativeDisplayUi,      // 1:1 native-styled display settings UI (no ImGui windows)
+    .ui = hulk::DrawNativeDisplayUi,                 // 1:1 native-styled display settings UI (no ImGui windows)
     .pad = hulk::KeyboardPad,
-    .rumble = nullptr,                    // changes a rumble before it is set
+    .rumble = nullptr,                               // changes a rumble before it is set
 };
