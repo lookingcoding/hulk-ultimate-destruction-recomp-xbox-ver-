@@ -4,10 +4,7 @@ This is a native Windows port project for the original Xbox version of The Incre
 
 Verified input:
 
-- Discs: both retail releases of the game's disc, each a retail disc image (`.iso`, any file name) in `assets/`. They hold two builds of `default.xbe` (entries `0020AAC6` and `0020A016`), recompiled as `HulkRecompiled` from `config/game.toml` and `HulkRecompiledUSA` from `config/game_usa.toml`; host addresses for both are in `src/common/addresses.h`, and whichever executable starts hands over to the one built for the disc in `assets/` (`src/common/release.cpp`).
-- Disc size: 2,934,767,616 bytes; XDVDFS game partition at offset 0.
-- Title ID: `56550039`; retail entry point: `0020AAC6`.
-- `default.xbe`: 5,210,112 bytes; SHA256 `CE236582A5F65F0732B0EFC612AC83430B2A98276C6FF8763979ABC0E94782F4`.
+- Disc: your own retail disc image of the game (`.iso`, any file name) in `assets/`.
 - XDK 5849: XAPILIB, XBOXKRNL, LIBCMT, D3D8, XGRAPHC, DSOUND.
 - SDK: TGP482/XboxXBE-Recomp, base commit `0fd00442660573dc342b41c11c6574318f0e8698`, pinned as `sdk/` submodule with the local patches under `patches/` applied by the build script.
 - LLVM 23.1.4 portable compiler archive verified against GitHub's SHA256 digest.
