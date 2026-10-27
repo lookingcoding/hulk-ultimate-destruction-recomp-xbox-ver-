@@ -10,6 +10,9 @@
 #include <cstring>
 #include <deque>
 #include <mutex>
+#include <optional>
+#include <string>
+#include <vector>
 #include "common/keyboard.h"
 #include "common/replay.h"
 #include "core/input.h"
@@ -120,11 +123,25 @@ std::atomic<float> mouse_sensitivity{1.0f};
 std::atomic<bool> mouse_invert_y{false};
 std::atomic<bool> mouse_smoothing{false};
 
-// Menu selection tracking
-std::atomic<int> current_menu_selected_row{0};
-std::atomic<uint32_t> last_menu_flow_state{0};
+// A frontend slot: the main menu's tabs (row 0, columns 0 to 2) or a list row (column -1, rows from 1)
+struct Slot {
+    int col, row;
+};
+
+// Where the mouse wants the highlight: the D-pad steps there one press at a time, checking the game's highlight
+// between presses, so disabled rows, wrapping and any row count come out as the game has them
+struct MenuTarget {
+    bool active = false;
+    Slot slot{};
+    bool press = false;      // a click: select it once highlighted
+    bool back_sent = false;  // a click on a tab from a list goes back to the tabs first
+    int steps = 0;
+    int last_diff = 0;
+    Clock::time_point next_step{}, until{};
+};
 
 std::mutex mouse_mutex;
+MenuTarget menu_target{};
 ButtonLatch mouse_left{};
 ButtonLatch mouse_right{};
 StepQueue dpad_steps{};
@@ -152,20 +169,6 @@ bool ReadGuestU32(const uint8_t* base, uint32_t va, uint32_t& out) {
     }
 }
 
-// Queries CGameFlowManager state in guest memory:
-// 1 = GS_FRONTEND, 2 = GS_PREGAME, 3 = GS_PRESSSTART, 4 = GS_GAME (Active Gameplay),
-// 5 = GS_POSTGAME, 6 = GS_PAUSE, 7 = GS_FMV, 8 = GS_QUIT.
-uint32_t GetGameFlowState() {
-    const uint8_t* base = mem::Base();
-    if (!base) return 0;
-    uint32_t app_ptr = 0, flow_mgr = 0, state_obj = 0, cur_state = 0;
-    if (!ReadGuestU32(base, 0x004DF840u, app_ptr) || !app_ptr) return 0;
-    if (!ReadGuestU32(base, app_ptr + 0x54u, flow_mgr) || !flow_mgr) return 0;
-    if (!ReadGuestU32(base, flow_mgr + 0x04u, state_obj) || !state_obj) return 0;
-    if (!ReadGuestU32(base, state_obj + 0x04u, cur_state)) return 0;
-    return cur_state;
-}
-
 bool IsInMenuState() {
     const int override_mode = test_mode_override.load(std::memory_order_relaxed);
     if (override_mode != 0) return override_mode > 0;
@@ -180,23 +183,130 @@ bool IsInMenuState() {
     return !(cur_state == 4u && req_state == 4u);
 }
 
-// Returns the menu row index under the cursor, or -1 if outside menu rows.
-// Native menu items start at Y ~110 and are spaced ~31.5px apart in 640x480 space.
-int GetHoveredMenuRow(int cursor_x, int cursor_y, int client_w, int client_h) {
-    if (client_w <= 0 || client_h <= 0) return -1;
+// The slot under the cursor, in the 640x480 frame the frontend is laid out in: the main menu's tabs across the top,
+// then list rows whose bars span the screen, the first centred at y 117 and each 25.3 below the last (the main menu's
+// FEmain_*_itemN, sub-screens' FEsubMenu_textN and the pause menu's FEpause_textN all sit there)
+std::optional<Slot> SlotAt(int cursor_x, int cursor_y, int client_w, int client_h) {
+    if (client_w <= 0 || client_h <= 0) return std::nullopt;
     const float vx = (static_cast<float>(cursor_x) / static_cast<float>(client_w)) * 640.0f;
     const float vy = (static_cast<float>(cursor_y) / static_cast<float>(client_h)) * 480.0f;
+    if (vy >= 48.0f && vy < 84.0f) return Slot{vx < 253.0f ? 0 : vx < 387.0f ? 1 : 2, 0};
+    const int row = static_cast<int>(std::floor((vy - 104.5f) / 25.3f)) + 1;
+    if (row < 1 || row > 9) return std::nullopt;
+    return Slot{-1, row};
+}
 
-    // Menu text & highlight bars span across the center of the screen
-    if (vx >= 50.0f && vx <= 590.0f) {
-        constexpr float kStartY = 110.0f;
-        constexpr float kRowH = 31.5f;
-        if (vy >= kStartY && vy < kStartY + 6 * kRowH) {
-            int row = static_cast<int>((vy - kStartY) / kRowH);
-            return std::clamp(row, 0, 5);
+// the frontend's hash of a widget's slot name (0x002CF820)
+uint64_t SlotHash(const char* name) {
+    uint64_t h = 0;
+    for (const char* p = name; *p; ++p) h = (h * 0x1003Full) ^ uint64_t(int64_t(static_cast<signed char>(*p)));
+    return h;
+}
+
+const std::vector<std::pair<uint64_t, Slot>>& SlotNames() {
+    static const std::vector<std::pair<uint64_t, Slot>> names = [] {
+        std::vector<std::pair<uint64_t, Slot>> v;
+        const char* tabs[] = {"FEmain_left_title", "FEmain_center_title", "FEmain_right_title"};
+        for (int c = 0; c < 3; ++c) v.push_back({SlotHash(tabs[c]), Slot{c, 0}});
+        for (const char* prefix : {"FEmain_left_item", "FEmain_center_item", "FEmain_right_item", "FEsubMenu_text", "FEpause_text"}) {
+            for (int r = 1; r <= 9; ++r) v.push_back({SlotHash((std::string(prefix) + std::to_string(r)).c_str()), Slot{-1, r}});
         }
+        return v;
+    }();
+    return names;
+}
+
+// The highlighted widget's slot. The FE manager (0x004E2BA0) keeps its screen at +0x175C, a dialog over it at +0x1760;
+// a screen's children are at +0x44C and the highlighted one's text at +0x48, the text's slot name hash at +0x20.
+// Nothing for a dialog or a slot the list does not name: the mouse then clicks as the A button.
+std::optional<Slot> HighlightedSlot(bool* selector = nullptr) {
+    const uint8_t* base = mem::Base();
+    uint32_t mgr = 0, screen = 0, dialog = 0, text = 0, lo = 0, hi = 0;
+    if (!ReadGuestU32(base, 0x004E2BA0u, mgr) || !mgr) return std::nullopt;
+    if (!ReadGuestU32(base, mgr + 0x1760u, dialog) || dialog) return std::nullopt;
+    if (!ReadGuestU32(base, mgr + 0x175Cu, screen) || !screen) return std::nullopt;
+    if (!ReadGuestU32(base, screen + 0x48u, text) || !text) return std::nullopt;
+    if (!ReadGuestU32(base, text + 0x20u, lo) || !ReadGuestU32(base, text + 0x24u, hi)) return std::nullopt;
+    const uint64_t hash = uint64_t(hi) << 32 | lo;
+    for (const auto& [h, slot] : SlotNames()) {
+        if (h != hash) continue;
+        if (selector) {
+            // the child holding the text: TextSelector's vtable is 0x0040CFAC
+            uint32_t owner = 0;
+            for (uint32_t i = 0; i < 0x80; ++i) {
+                uint32_t child = 0;
+                if (!ReadGuestU32(base, screen + 0x44Cu + i * 4, child) || !child) break;
+                if (child <= text && text - child < 0x400 && child > owner) owner = child;
+            }
+            uint32_t vtable = 0;
+            *selector = owner && ReadGuestU32(base, owner, vtable) && vtable == 0x0040CFACu;
+        }
+        return slot;
     }
-    return -1;
+    return std::nullopt;
+}
+
+// a pulse of a latched button, as a click is
+void Pulse(ButtonLatch& button) {
+    button.Press();
+    button.Release();
+}
+
+// one D-pad press toward the target once the last has been taken in, then the click when it is highlighted
+void StepTowardTarget(Clock::time_point now) {
+    MenuTarget& t = menu_target;
+    if (!t.active) return;
+    if (now > t.until) {
+        t.active = false;
+        return;
+    }
+    if (dpad_steps.Busy() || now < t.next_step) return;
+    bool selector = false;
+    const std::optional<Slot> cur = HighlightedSlot(&selector);
+    if (!cur) {
+        if (t.press) Pulse(mouse_left);
+        t.active = false;
+        return;
+    }
+    const bool want_tab = t.slot.row == 0, at_tab = cur->row == 0;
+    if (want_tab != at_tab) {
+        if (want_tab && t.press && !t.back_sent) {
+            Pulse(mouse_right);
+            t.back_sent = true;
+            t.next_step = now + std::chrono::milliseconds(300);
+            return;
+        }
+        t.active = false;
+        return;
+    }
+    const int diff = want_tab ? t.slot.col - cur->col : t.slot.row - cur->row;
+    if (diff == 0) {
+        if (t.press) {
+            if (selector) dpad_steps.Push(0x08u);  // a selector's next choice
+            else Pulse(mouse_left);
+        }
+        t.active = false;
+        return;
+    }
+    // a disabled or missing slot: the last press went past it or nowhere
+    if (t.steps >= 12 || (t.last_diff && std::abs(diff) >= std::abs(t.last_diff))) {
+        t.active = false;
+        return;
+    }
+    dpad_steps.Push(want_tab ? (diff > 0 ? 0x08u : 0x04u) : (diff > 0 ? 0x02u : 0x01u));
+    t.steps++;
+    t.last_diff = diff;
+    t.next_step = now + std::chrono::milliseconds(90);
+}
+
+void SetMenuTarget(Slot slot, bool press) {
+    MenuTarget& t = menu_target;
+    if (!press && t.active && !t.press && t.slot.col == slot.col && t.slot.row == slot.row) return;
+    t = MenuTarget{};
+    t.active = true;
+    t.slot = slot;
+    t.press = press;
+    t.until = Clock::now() + std::chrono::milliseconds(2500);
 }
 
 bool CenterCursorInWindow(HWND hwnd, POINT& center_client) {
@@ -278,6 +388,7 @@ void Clear() {
     mouse_left.Reset();
     mouse_right.Reset();
     dpad_steps.Reset();
+    menu_target = MenuTarget{};
     wheel_v_accum = 0;
     wheel_h_accum = 0;
     has_cursor_pos = false;
@@ -402,12 +513,11 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         case WM_LBUTTONDOWN:
         case WM_LBUTTONDBLCLK: {
             std::lock_guard lock(mouse_mutex);
-            // In menus, ensure the row currently under the cursor is selected
-            if (in_menu) {
-                const int hovered = GetHoveredMenuRow(last_cursor_x, last_cursor_y, client_w, client_h);
-                if (hovered >= 0) {
-                    current_menu_selected_row.store(hovered, std::memory_order_relaxed);
-                }
+            // In menus, the click selects the slot under the cursor; off every slot it does nothing, and where the
+            // highlight cannot be read (a dialog) it is the A button
+            if (in_menu && HighlightedSlot()) {
+                if (auto slot = SlotAt(GET_X_LPARAM(lp), GET_Y_LPARAM(lp), client_w, client_h)) SetMenuTarget(*slot, true);
+                break;
             }
             mouse_left.Press();
             break;
@@ -431,8 +541,12 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         case WM_MOUSEWHEEL: {
             if (!in_menu) break;
             std::lock_guard lock(mouse_mutex);
+            menu_target.active = false;
             wheel_v_accum += GET_WHEEL_DELTA_WPARAM(wp);
-            const bool horizontal = (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) != 0 || Down(VK_SHIFT);
+            // over a selector the wheel changes its choice
+            bool selector = false;
+            const bool over_selector = HighlightedSlot(&selector) && selector;
+            const bool horizontal = over_selector || (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) != 0 || Down(VK_SHIFT);
             while (wheel_v_accum >= WHEEL_DELTA) {
                 wheel_v_accum -= WHEEL_DELTA;
                 dpad_steps.Push(horizontal ? 0x04u : 0x01u);  // Left or Up
@@ -474,20 +588,10 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
             if (dx == 0 && dy == 0) break;
 
             if (in_menu) {
-                // Check if the cursor entered a new menu item row
-                const int hovered = GetHoveredMenuRow(x, y, client_w, client_h);
-                if (hovered >= 0) {
-                    const int sel = current_menu_selected_row.load(std::memory_order_relaxed);
-                    if (hovered != sel) {
-                        dpad_steps.Reset();
-                        const int diff = hovered - sel;
-                        if (diff > 0) {
-                            dpad_steps.Push(0x02u);  // DPAD_DOWN
-                        } else if (diff < 0) {
-                            dpad_steps.Push(0x01u);  // DPAD_UP
-                        }
-                        current_menu_selected_row.store(hovered, std::memory_order_relaxed);
-                    }
+                // hovering highlights the slot under the cursor, within the tabs or within the list
+                if (HighlightedSlot()) {
+                    if (auto slot = SlotAt(x, y, client_w, client_h); slot && !(menu_target.active && menu_target.press))
+                        SetMenuTarget(*slot, false);
                 } else if (test_mode_override.load(std::memory_order_relaxed) > 0) {
                     // For synthetic unit tests: pulse D-pad on relative dy
                     move_accum_y += dy;
@@ -528,23 +632,6 @@ void KeyboardPad(int port, input::Pad& pad) {
     if (last_polled_menu_state.exchange(menu_flag, std::memory_order_relaxed) != menu_flag) {
         if (HWND hwnd = game_hwnd.load(std::memory_order_relaxed); hwnd && IsWindow(hwnd)) {
             PostMessageW(hwnd, kSyncCursorMsg, static_cast<WPARAM>(menu_flag), 0);
-        }
-    }
-
-    const uint32_t flow_state = GetGameFlowState();
-    if (last_menu_flow_state.exchange(flow_state, std::memory_order_relaxed) != flow_state) {
-        current_menu_selected_row.store(0, std::memory_order_relaxed);
-    }
-
-    // Keyboard navigation tracking in menus
-    if (in_menu) {
-        if (Down(VK_UP)) {
-            int cur = current_menu_selected_row.load(std::memory_order_relaxed);
-            if (cur > 0) current_menu_selected_row.store(cur - 1, std::memory_order_relaxed);
-        }
-        if (Down(VK_DOWN)) {
-            int cur = current_menu_selected_row.load(std::memory_order_relaxed);
-            if (cur < 5) current_menu_selected_row.store(cur + 1, std::memory_order_relaxed);
         }
     }
 
@@ -597,8 +684,9 @@ void KeyboardPad(int port, input::Pad& pad) {
             // Left Click = Button A (Select)
             // Right Click = Button B (Back)
             // Mouse Wheel & Cursor Move = D-Pad navigation
-            if (left_pressed) pad.analog[0] = 255;
-            if (right_pressed) pad.analog[1] = 255;
+            StepTowardTarget(now);
+            if (left_pressed || mouse_left.Sample(now)) pad.analog[0] = 255;
+            if (right_pressed || mouse_right.Sample(now)) pad.analog[1] = 255;
             pad.buttons |= dpad_steps.Sample(now);
             look_dx = 0.0f;
             look_dy = 0.0f;
