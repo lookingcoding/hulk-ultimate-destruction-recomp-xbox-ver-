@@ -41,7 +41,7 @@ target_include_directories(hulk_display_menu_tests PRIVATE src ${SDK}/runtime)
 add_test(NAME display_menu_rcf COMMAND hulk_display_menu_tests ${CMAKE_CURRENT_SOURCE_DIR}/assets/misc.rcf)
 
 file(GLOB XBE_HOST_SOURCES CONFIGURE_DEPENDS src/*/*.cpp)
-list(FILTER XBE_HOST_SOURCES EXCLUDE REGEX "/src/game/")
+list(FILTER XBE_HOST_SOURCES EXCLUDE REGEX "/src/game(_usa)?/")
 
 # partitions as xbe_symbols wrote them into config/game.toml
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS config/game.toml)
@@ -60,7 +60,22 @@ add_xbe_image(HulkRecompiled default.xbe game.toml ${GAME_PARTITIONS} game)
 # even when the linker leaves the unchanged export import-library timestamp alone.
 set_property(TARGET HulkRecompiled_code APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:HulkRecompiled>)
 
+# The North American release (USA, Asia) is another build of the game: its own config and hooks at its own
+# addresses (src/common/addresses.h), built when that disc's default.xbe is in assets/usa
+set(HULK_TARGETS HulkRecompiled)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/assets/usa/default.xbe AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/config/game_usa.toml)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS config/game_usa.toml)
+    file(STRINGS config/game_usa.toml USA_PARTITIONS REGEX "^partitions *=")
+    string(REGEX MATCH "[0-9]+" USA_PARTITIONS "${USA_PARTITIONS}")
+    add_xbe_image(HulkRecompiledUSA usa/default.xbe game_usa.toml ${USA_PARTITIONS} game_usa)
+    target_compile_definitions(HulkRecompiledUSA PRIVATE HULK_USA=1)
+    set_property(TARGET HulkRecompiledUSA_code APPEND PROPERTY LINK_DEPENDS $<TARGET_FILE:HulkRecompiledUSA>)
+    list(APPEND HULK_TARGETS HulkRecompiledUSA)
+endif()
+
 option(HULK_DIAGNOSTICS "Keep detailed runtime logs during port bring-up" ON)
 if(HULK_DIAGNOSTICS)
-    target_compile_options(HulkRecompiled PRIVATE -UNDEBUG)
+    foreach(target ${HULK_TARGETS})
+        target_compile_options(${target} PRIVATE -UNDEBUG)
+    endforeach()
 endif()

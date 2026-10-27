@@ -1,4 +1,6 @@
 #include "app/app.h"
+#include "common/addresses.h"
+#include "common/camera.h"
 #include "common/diagnostics.h"
 #include "common/display_menu.h"
 #include "common/keyboard.h"
@@ -9,11 +11,15 @@
 // SDL3, linked into the executable for the runtime's controllers (input::Init opens it before boot)
 extern "C" bool SDL_HasGamepad(void);
 
+#ifdef HULK_USA
+constexpr const char* kExe = "HulkRecompiledUSA";  // the North American release
+#else
+constexpr const char* kExe = "HulkRecompiled";     // the European release
+#endif
+
 namespace {
 void OnImageLoaded() {
-    // Camera Options' Invert X/Y flags (0x004DF97A, 0x004DF97B) start zeroed, which the game shows and plays as both
-    // axes inverted; a save keeps the player's own choice and restores it over this (0x0008AA91)
-    if (uint8_t* base = mem::Base()) base[0x004DF97A] = base[0x004DF97B] = 1;
+    hulk::KeepCameraInvert();  // Camera Options' Invert X/Y as the player set them, not inverted at first
     // button prompts: a controller's when one is plugged in, before the game reads its strings
     hulk::SetControllerPrompts(SDL_HasGamepad());
 }
@@ -24,6 +30,7 @@ void OnWindowReady(void* hwnd) {
 
 void OnPad(int port, input::Pad& pad) {
     hulk::TickDisplaySettings();
+    hulk::KeepCameraInvert();
     if (port == 0) hulk::SetControllerPrompts(pad.connected);  // a physical controller; keyboard input joins after
     hulk::KeyboardPad(port, pad);
 }
@@ -39,7 +46,7 @@ const app::GameInfo app::kGame = {
     .splash = L"splash",                             // optional splash.png or splash.bmp beside the exe
     .missing = L"No working copy of the game was found. Put your Xbox disc image of The Incredible Hulk: Ultimate "
                L"Destruction (.iso, any file name) in the assets folder, or default.xbe with its folders beside it.",
-    .images = {{"default.xbe", "HulkRecompiled"}},   // each recompiled xbe and its exe, for title launches
+    .images = {{"default.xbe", kExe}},               // each recompiled xbe and its exe, for title launches
     .options = {},                                   // game settings kept in the settings file
     .load = hulk::LoadCustomSettings,                // reads more from the settings file's toml::table
     .save = hulk::SaveCustomSettings,                // writes more into it

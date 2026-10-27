@@ -132,8 +132,9 @@ int main(int argc, char** argv) {
         if (file.size() > 2 && file[0] == 0xFF && file[1] == 0xFE) tables.push_back(Utf16(file));
         else scripts.emplace_back(file.begin(), file.end());
     }
-    Check(moved == 7, "fe_real.txt, fe_run.txt and five string tables moved");
-    Check(tables.size() == 5 && scripts.size() == 2, "five string tables, two scripts");
+    // the European disc has five string tables, the North American one English only
+    Check(scripts.size() == 2 && (tables.size() == 5 || tables.size() == 1) && moved == scripts.size() + tables.size(),
+          "fe_real.txt, fe_run.txt and each string table moved");
     for (const std::string& t : tables) {
         Check(t.find("TBS_PC_DISPLAY_OPTIONS\t") != std::string::npos, "string tables have the menu's keys");
         Check(t.find("TBS_MENU_ITEM_OM_CAMERA_OPTIONS\t") != std::string::npos, "string tables keep their own");
@@ -158,6 +159,9 @@ int main(int argc, char** argv) {
         Check(script->find("AddNamedValueInt \"PCVSync\" 0 \"PCVSyncChanged\"") != std::string::npos, "vsync on selected");
         Check(script->find("AddNamedValueInt \"PCRenderScale\" 2 \"PCRenderScaleChanged\"") != std::string::npos, "100% selected");
         Check(script->find("        OnHighlight function \"PCDisplaySync\"\r\n") != std::string::npos, "the selectors sync on highlight");
+        Check(script->find("TBS_MENU_ITEM_NO TBS_MENU_ITEM_YES\r\n        NamedValue \"CameraInvertX\"") != std::string::npos &&
+                  script->find("TBS_MENU_ITEM_NO TBS_MENU_ITEM_YES\r\n        NamedValue \"CameraInvertY\"") != std::string::npos,
+              "Invert X and Y name the camera that looks up with the stick No");
     }
     Check(main_menu.find("AddTextButton \"FEmain_left_item5\"\r\n    {\r\n        text \"TBS_PC_DISPLAY_OPTIONS\"") != std::string::npos &&
               main_menu.find("AddTextSelector \"FEsubMenu_text5\"") != std::string::npos,
@@ -207,6 +211,7 @@ int main(int argc, char** argv) {
               again.find("AddNamedValueInt \"PCDisplayMode\" 2 \"PCDisplayModeChanged\"") != std::string::npos,
           "the script read again starts at the settings as they are");
     Check(again.size() == rcf.size(), "the archive keeps its size");
+
 
     std::printf(failures ? "%d failed\n" : "display menu: all passed\n", failures);
     return failures ? 1 : 0;

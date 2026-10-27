@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "common/addresses.h"
 #include "common/keyboard.h"
 #include "common/replay.h"
 #include "core/input.h"
@@ -175,7 +176,7 @@ bool IsInMenuState() {
     const uint8_t* base = mem::Base();
     if (!base) return true;
     uint32_t app_ptr = 0, flow_mgr = 0, state_obj = 0, req_state = 0, cur_state = 0;
-    if (!ReadGuestU32(base, 0x004DF840u, app_ptr) || !app_ptr) return true;
+    if (!ReadGuestU32(base, hulk::addr::kApp, app_ptr) || !app_ptr) return true;
     if (!ReadGuestU32(base, app_ptr + 0x54u, flow_mgr) || !flow_mgr) return true;
     if (!ReadGuestU32(base, flow_mgr + 0x04u, state_obj) || !state_obj) return true;
     if (!ReadGuestU32(base, state_obj + 0x00u, req_state)) return true;
@@ -216,13 +217,13 @@ const std::vector<std::pair<uint64_t, Slot>>& SlotNames() {
     return names;
 }
 
-// The highlighted widget's slot. The FE manager (0x004E2BA0) keeps its screen at +0x175C, a dialog over it at +0x1760;
+// The highlighted widget's slot. The FE manager (addresses.h) keeps its screen at +0x175C, a dialog over it at +0x1760;
 // a screen's children are at +0x44C and the highlighted one's text at +0x48, the text's slot name hash at +0x20.
 // Nothing for a dialog or a slot the list does not name: the mouse then clicks as the A button.
 std::optional<Slot> HighlightedSlot(bool* selector = nullptr) {
     const uint8_t* base = mem::Base();
     uint32_t mgr = 0, screen = 0, dialog = 0, text = 0, lo = 0, hi = 0;
-    if (!ReadGuestU32(base, 0x004E2BA0u, mgr) || !mgr) return std::nullopt;
+    if (!ReadGuestU32(base, hulk::addr::kFrontend, mgr) || !mgr) return std::nullopt;
     if (!ReadGuestU32(base, mgr + 0x1760u, dialog) || dialog) return std::nullopt;
     if (!ReadGuestU32(base, mgr + 0x175Cu, screen) || !screen) return std::nullopt;
     if (!ReadGuestU32(base, screen + 0x48u, text) || !text) return std::nullopt;
@@ -231,7 +232,7 @@ std::optional<Slot> HighlightedSlot(bool* selector = nullptr) {
     for (const auto& [h, slot] : SlotNames()) {
         if (h != hash) continue;
         if (selector) {
-            // the child holding the text: TextSelector's vtable is 0x0040CFAC
+            // the child holding the text, a TextSelector by its vtable
             uint32_t owner = 0;
             for (uint32_t i = 0; i < 0x80; ++i) {
                 uint32_t child = 0;
@@ -239,7 +240,7 @@ std::optional<Slot> HighlightedSlot(bool* selector = nullptr) {
                 if (child <= text && text - child < 0x400 && child > owner) owner = child;
             }
             uint32_t vtable = 0;
-            *selector = owner && ReadGuestU32(base, owner, vtable) && vtable == 0x0040CFACu;
+            *selector = owner && ReadGuestU32(base, owner, vtable) && vtable == hulk::addr::kTextSelectorVtable;
         }
         return slot;
     }

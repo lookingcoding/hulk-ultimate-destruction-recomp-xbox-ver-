@@ -8,11 +8,13 @@ A native Windows port and static recompilation of the original Xbox version of *
 
 ## Download & Play
 
-1. Download `HulkRecompiled-<version>-windows-x64.zip` from [Releases](https://github.com/lookingcoding/hulk-ultimate-destruction-recomp-xbox-ver-/releases) and extract it.
+1. Download the zip for your disc from [Releases](https://github.com/lookingcoding/hulk-ultimate-destruction-recomp-xbox-ver-/releases) and extract it:
+   - `HulkRecompiled-<version>-windows-x64-USA.zip` for the North American disc, "(USA, Asia)", the one most copies are.
+   - `HulkRecompiled-<version>-windows-x64-Europe.zip` for the European disc, "(Europe) (En,Fr,Es,It)".
 2. Put your Xbox disc image (`.iso`) in the `assets` folder.
-3. Run `Play.bat` (or `HulkRecompiled.exe`).
+3. Run `Play.bat`.
 
-The game checks the disc when it starts: it must be an Xbox disc image with the game's `default.xbe` on it, and if it is a different build of the game than this port was made from, it warns you before starting. The first launch builds the game's code from your disc with the included `compiler` folder, which takes a few minutes and needs about 1 GB of free space; later launches start straight away.
+The game checks the disc when it starts: it must be an Xbox disc image with the game's `default.xbe` on it, and if it is the other disc's build of the game, it warns you before starting, so you can get the other download. The first launch builds the game's code from your disc with the included `compiler` folder, which takes a few minutes and needs about 1 GB of free space; later launches start straight away.
 
 ---
 
@@ -28,7 +30,7 @@ The game checks the disc when it starts: it must be an Xbox disc image with the 
   - Clicking a tab (Options / Story Mode / Extras) from inside a list goes back and opens that tab. Clicking or scrolling on a selector changes its value.
   - Clicking off every row does nothing. In dialogs the left click is the A button.
 - **Button prompts follow your input device:** with no controller plugged in, tooltips name your keys and mouse buttons (e.g. "Walk Hulk around with [WASD]", "press [Q] to pick it up"); with a controller they show its buttons. The game reads its strings as it loads, so plugging in or unplugging a controller mid-game shows from the next load. The menus' bottom prompt ("[Enter] Select  [Q] Back", Delete on save screens) changes at once.
-- **Camera not inverted by default:** a new game starts with Invert X/Y set to No (a save keeps whatever its player chose).
+- **Camera not inverted by default:** Invert X-Axis and Invert Y-Axis start at No, and No now means the camera follows the stick (the original game labelled it the other way round). Your choice is kept in `settings.toml`, the same for every save.
 - **Display Options in the game's own Options menu:**
   - Main menu > Options and the pause menu's Options each have a **Display Options** row, built from the game's own frontend script, art, fonts and transitions, and driven by the controller or keyboard like every other row. Its strings are added in English, French, Spanish and Italian.
   - **Display Mode:** Fullscreen, Borderless, Windowed.

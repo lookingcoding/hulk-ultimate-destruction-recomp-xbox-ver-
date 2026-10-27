@@ -1,0 +1,29 @@
+--- a/runtime/app/game_code.cpp
++++ b/runtime/app/game_code.cpp
+@@ -88,12 +88,15 @@
+ 
+ fs::path CompilerDir() { return ExeDir() / "compiler"; }
+ 
+-// the config in compiler\config whose [xbe] path is this xbe; an included one has no path
+-fs::path ConfigFor(const std::string& xbe) {
++// the config in compiler\config whose [xbe] path is this xbe; an included one has no path. Releases of one game name
++// their xbe alike, so a config naming its library is this executable's only when the library is <exe>.dll
++fs::path ConfigFor(const std::string& xbe, const std::string& exe) {
+     std::error_code ec;
+     for (auto& e : fs::directory_iterator(CompilerDir() / "config", ec)) {
+         try {
+             toml::table t = toml::parse_file(e.path().string());
++            std::string library = t["xbe"]["library"].value_or(std::string());
++            if (!library.empty() && library != exe + ".dll") continue;
+             if (fs::path(t["xbe"]["path"].value_or(std::string())).filename() == xbe) return e.path();
+         } catch (const toml::parse_error&) {
+         }
+@@ -105,7 +108,7 @@
+     std::vector<Image> images;
+     for (auto& [xbe, exe] : kGame.images) {
+         std::string name = exe;
+-        images.push_back({std::wstring(name.begin(), name.end()), xbe, ConfigFor(xbe)});
++        images.push_back({std::wstring(name.begin(), name.end()), xbe, ConfigFor(xbe, name)});
+     }
+     return images;
+ }

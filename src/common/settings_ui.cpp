@@ -1,5 +1,6 @@
 #include "common/settings_ui.h"
 #include <toml++/toml.hpp>
+#include "common/camera.h"
 #include "common/keyboard.h"
 
 namespace hulk {
@@ -16,6 +17,7 @@ void LoadCustomSettings(const void* table_ptr) {
     if (auto v = t["mouse_smoothing"].value<bool>()) {
         SetMouseSmoothing(*v);
     }
+    SetCameraInvert(t["camera_invert_x"].value_or(false), t["camera_invert_y"].value_or(false));
 }
 
 void SaveCustomSettings(void* table_ptr) {
@@ -24,6 +26,8 @@ void SaveCustomSettings(void* table_ptr) {
     t.insert_or_assign("mouse_sensitivity", GetMouseSensitivity());
     t.insert_or_assign("mouse_invert_y", GetMouseInvertY());
     t.insert_or_assign("mouse_smoothing", GetMouseSmoothing());
+    t.insert_or_assign("camera_invert_x", GetCameraInvertX());  // Camera Options, as the player set them (camera.h)
+    t.insert_or_assign("camera_invert_y", GetCameraInvertY());
 }
 
 }  // namespace hulk

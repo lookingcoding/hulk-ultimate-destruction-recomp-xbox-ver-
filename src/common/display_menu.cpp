@@ -1,4 +1,5 @@
 #include "common/display_menu.h"
+#include "common/addresses.h"
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -14,19 +15,20 @@
 namespace hulk {
 namespace {
 
-// default.xbe
-constexpr uint32_t kGuestNew = 0x0008D730;             // operator new, cdecl
-constexpr uint32_t kRegisterIntCallback = 0x000FC420;  // cdecl (name, functor): keeps the name's hash and the functor
-constexpr uint32_t kIntFunctorVtable = 0x00409B40;     // functor: vtable, owner, method (thiscall owner, int value)
-constexpr uint32_t kSharedHandler = 0x000BBEC0;        // AudioQualityChanged, PS2 and GameCube only: hooks.cpp
-constexpr uint32_t kRegisterCallback = 0x000FC400;     // cdecl (name, functor): a function the scripts call
-constexpr uint32_t kFunctorVtable = 0x00409B30;        // functor: method (thiscall owner, argc, argv) returning int
-constexpr uint32_t kSyncHandler = 0x000B46B0;          // Print, which no Xbox script calls: hooks.cpp
-// a screen's selectors start where the game's code sets them (the camera options at 0x000B5C50 do so):
-constexpr uint32_t kFindWidget = 0x000FC480;           // cdecl (name): the widget of the current screen
-constexpr uint32_t kDynamicCast = 0x00340764;          // __RTDynamicCast (object, 0, from, to, 0)
-constexpr uint32_t kWidgetType = 0x0049FCE4, kTextSelectorType = 0x0049FCFC;
-constexpr uint32_t kSetSelection = 0x64;               // TextSelector vtable offset, thiscall (index)
+// default.xbe (addresses.h)
+using addr::kGuestNew;             // operator new, cdecl
+using addr::kRegisterIntCallback;  // cdecl (name, functor): keeps the name's hash and the functor
+using addr::kIntFunctorVtable;     // functor: vtable, owner, method (thiscall owner, int value)
+using addr::kSharedHandler;        // AudioQualityChanged, PS2 and GameCube only: hooks.cpp
+using addr::kRegisterCallback;     // cdecl (name, functor): a function the scripts call
+using addr::kFunctorVtable;        // functor: method (thiscall owner, argc, argv) returning int
+using addr::kSyncHandler;          // Print, which no Xbox script calls: hooks.cpp
+// a screen's selectors start where the game's code sets them (the European camera options at 0x000B5C50 do so):
+using addr::kFindWidget;           // cdecl (name): the widget of the current screen
+using addr::kDynamicCast;          // __RTDynamicCast (object, 0, from, to, 0)
+using addr::kWidgetType;
+using addr::kTextSelectorType;
+constexpr uint32_t kSetSelection = 0x64;  // TextSelector vtable offset, thiscall (index)
 // the selectors' functors carry these as owners: the guest's null page, never an object; kSettings is the sync
 constexpr uint32_t kOwnerBase = 0x100;
 constexpr const char* kSyncName = "PCDisplaySync";
@@ -195,6 +197,20 @@ struct Script {
     std::string text;
     size_t selection[kSettings];  // offsets of the named values' digits
 };
+
+// Camera Options' Invert X and Invert Y name their choices the other way round: the game shows "Yes" for the camera
+// that looks up as the stick goes up, the one players expect, and plays "No" upside down (camera.h). Each selector's
+// choices swap places, the same length, so "No" is that camera
+void SwapInvertLabels(std::string& script) {
+    const std::string yes_no = "TextSelection \"\" TBS_MENU_ITEM_YES TBS_MENU_ITEM_NO";
+    const std::string no_yes = "TextSelection \"\" TBS_MENU_ITEM_NO TBS_MENU_ITEM_YES";
+    for (const char* value : {"NamedValue \"CameraInvertX\"", "NamedValue \"CameraInvertY\""}) {
+        for (size_t at = script.find(value); at != std::string::npos; at = script.find(value, at + 1)) {
+            size_t choices = script.rfind(yes_no, at);
+            if (choices != std::string::npos && at - choices < 120) script.replace(choices, yes_no.size(), no_yes);
+        }
+    }
+}
 
 std::optional<Script> EditScript(const std::string& in, const Layout& l) {
     const std::string nl = in.find("\r\n") != std::string::npos ? "\r\n" : "\n";
@@ -480,7 +496,9 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
         auto e = find(l.file);
         if (!e) continue;
         std::vector<uint8_t> raw = contents(*e);
-        if (auto script = EditScript(std::string(raw.begin(), raw.end()), l)) scripts.emplace_back(*e, std::move(*script));
+        std::string text(raw.begin(), raw.end());
+        SwapInvertLabels(text);
+        if (auto script = EditScript(text, l)) scripts.emplace_back(*e, std::move(*script));
     }
     if (scripts.empty()) return nullptr;
     for (auto& [name, column] : kLanguages) {

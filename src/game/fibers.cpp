@@ -1,17 +1,18 @@
-// XDK 5849 fibers in this XBE: CreateFiber 00350E1E, SwitchToFiber
-// 00350EBD, DeleteFiber 00350EAA, ConvertThreadToFiber 00350F03.
+// XDK 5849 fibers in the European XBE: CreateFiber 00350E1E, SwitchToFiber
+// 00350EBD, DeleteFiber 00350EAA, ConvertThreadToFiber 00350F03 (addresses.h has both releases).
 // Switching the guest ESP alone cannot suspend the recompiled C++ call stack.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <memory>
 #include <unordered_map>
+#include "common/addresses.h"
 #include "xdk/hle.h"
 
 using namespace kernel;
 namespace {
-constexpr uint32_t kSwitch = 0x00350EBD;
-constexpr uint32_t kBootstrap = 0x00350DD9;
+constexpr uint32_t kSwitch = hulk::addr::kSwitchToFiber;
+constexpr uint32_t kBootstrap = hulk::addr::kFiberBootstrap;
 struct Fiber {
     void* native = nullptr;
     X86Context* context = nullptr;
@@ -28,10 +29,10 @@ void WINAPI StartFiber(void* parameter) {
 }
 }
 
-X86_FUNC(sub_00350EBD) {
+X86_FUNC(HULK_SUB_SWITCH_TO_FIBER) {
     const uint32_t next = R32(ctx.esp + 4);
     const uint32_t stackBase = R32(ctx.fs_base + 4);
-    const uint32_t tlsIndex = R32(0x004E7BDC);
+    const uint32_t tlsIndex = R32(hulk::addr::kFiberTlsIndex);
     const uint32_t tls = R32(stackBase + tlsIndex * 4);
     const uint32_t current = R32(tls + 0x10);
     if (!next || !current) x86_trap(ctx, kSwitch, "invalid Xbox fiber record");
@@ -83,13 +84,13 @@ X86_FUNC(sub_00350EBD) {
     SwitchToFiber(fibers.at(next)->native);
 }
 
-X86_EXTERN_FUNC(__imp__sub_00350EAA);
-X86_FUNC(sub_00350EAA) {
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_DELETE_FIBER));
+X86_FUNC(HULK_SUB_DELETE_FIBER) {
     const uint32_t guest = R32(ctx.esp + 4);
     if (auto it = fibers.find(guest); it != fibers.end()) {
-        if (it->second->native == GetCurrentFiber()) x86_trap(ctx, 0x00350EAA, "deleting the active Xbox fiber");
+        if (it->second->native == GetCurrentFiber()) x86_trap(ctx, hulk::addr::kDeleteFiber, "deleting the active Xbox fiber");
         DeleteFiber(it->second->native);
         fibers.erase(it);
     }
-    __imp__sub_00350EAA(ctx, base);
+    HULK_IMP(HULK_SUB_DELETE_FIBER)(ctx, base);
 }
