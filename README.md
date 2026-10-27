@@ -4,7 +4,7 @@ A native Windows port and static recompilation of the European original Xbox ver
 
 > [!IMPORTANT]
 > **No game assets or ISO files are included in this repository.**
-> Users must provide their own legal retail copy of the European release of *The Incredible Hulk: Ultimate Destruction* (Xbox). Place your game `.iso` (or extracted game files with `default.xbe`) into the `assets/` directory.
+> Users must provide their own legal retail copy release of *The Incredible Hulk: Ultimate Destruction* (Xbox). Place your game `.iso` (or extracted game files with `default.xbe`) into the `assets/` directory.
 
 ---
 
