@@ -19,6 +19,7 @@ A native Windows port and static recompilation of the European original Xbox ver
   - Hovering a menu row or tab highlights it and clicking selects it. The port reads the game's real highlighted row and steps the D-pad until it matches the one under the pointer, so greyed-out rows, wrapping and every list length work.
   - Clicking a tab (Options / Story Mode / Extras) from inside a list goes back and opens that tab. Clicking or scrolling on a selector changes its value.
   - Clicking off every row does nothing. In dialogs the left click is the A button.
+- **Button prompts follow your input device:** with no controller plugged in, tooltips name your keys and mouse buttons (e.g. "Walk Hulk around with [WASD]", "press [Q] to pick it up"); with a controller they show its buttons. The game reads its strings as it loads, so plugging in or unplugging a controller mid-game shows from the next load.
 - **Camera not inverted by default:** a new game starts with Invert X/Y set to No (a save keeps whatever its player chose).
 - **Display Options in the game's own Options menu:**
   - Main menu > Options and the pause menu's Options each have a **Display Options** row, built from the game's own frontend script, art, fonts and transitions, and driven by the controller or keyboard like every other row. Its strings are added in English, French, Spanish and Italian.

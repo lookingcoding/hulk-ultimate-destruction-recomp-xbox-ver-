@@ -163,6 +163,7 @@ std::mutex g_lock;
 std::vector<Option> g_options;  // made once when misc.rcf is first opened, before the frontend loads
 std::atomic<bool> g_ready{false};   // g_options is made and stays as it is
 std::atomic<bool> g_served{false};  // the game reads the edited script
+std::atomic<bool> g_controller_prompts{false};  // the string tables as the game reads them: controller or keyboard
 std::atomic<int64_t> g_changed_at{0};  // steady clock ticks of the last unapplied change, 0 for none
 
 // the selection a selector starts at: the current setting's (one digit, the script's bytes keep their length)
@@ -286,22 +287,77 @@ void AppendUtf16(std::vector<uint8_t>& out, const char* utf8) {
     }
 }
 
-// a string table (UTF-16 lines of key, tab, text) with the menu's lines after its own
-std::optional<std::vector<uint8_t>> EditStrings(const std::vector<uint8_t>& in, int column, const char* name) {
+// The keyboard and mouse binding of each controller button prompt. The strings name buttons as \b and two letters,
+// which the font draws as the controller's button; keyboard.cpp maps the keys to those buttons.
+struct Prompt {
+    char code[3];
+    const char* text[4];  // en and uk, fr, es, it
+};
+const Prompt kKeyboardPrompts[] = {
+    {"ju", {"[Space]", "[Espace]", "[Espacio]", "[Spazio]"}},                                       // A
+    {"us", {"[Q]", "[Q]", "[Q]", "[Q]"}},                                                         // B
+    {"at", {"[Left Click]", "[Clic gauche]", "[Clic izquierdo]", "[Clic sinistro]"}},             // X
+    {"sp", {"[E]", "[E]", "[E]", "[E]"}},                                                         // Y
+    {"ta", {"[Right Click]", "[Clic droit]", "[Clic derecho]", "[Clic destro]"}},                 // left trigger
+    {"ru", {"[Shift]", "[Maj]", "[Mayús]", "[Maiusc]"}},                                          // right trigger
+    {"la", {"[WASD]", "[WASD]", "[WASD]", "[WASD]"}},                                             // left stick
+    {"lr", {"[A/D]", "[A/D]", "[A/D]", "[A/D]"}},                                                 // left stick around
+    {"ra", {"[Mouse]", "[Souris]", "[Ratón]", "[Mouse]"}},                                        // right stick
+    {"se", {"[Tab]", "[Tab]", "[Tab]", "[Tab]"}},                                                 // back
+    {"jc", {"[Hold Space]", "[Maintenir Espace]", "[Mantener Espacio]", "[Tenere Spazio]"}},      // A held
+    {"uc", {"[Hold Q]", "[Maintenir Q]", "[Mantener Q]", "[Tenere Q]"}},                          // B held
+    {"ac", {"[Hold Left Click]", "[Maintenir clic gauche]", "[Mantener clic izquierdo]", "[Tenere clic sinistro]"}},  // X held
+    {"sc", {"[Hold E]", "[Maintenir E]", "[Mantener E]", "[Tenere E]"}},                          // Y held
+};
+
+// a string table's lines with each button prompt as its key; the press start line keeps its own
+std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column) {
+    std::vector<uint8_t> out(in.begin(), in.begin() + 2);
+    std::u16string text(reinterpret_cast<const char16_t*>(in.data() + 2), (in.size() - 2) / 2);
+    std::u16string line_key;
+    for (size_t i = 0; i < text.size(); i++) {
+        if (i == 0 || text[i - 1] == u'\n') line_key = text.substr(i, text.find(u'\t', i) - i);
+        if (text[i] == u'\\' && i + 3 < text.size() && text[i + 1] == u'b' && line_key.rfind(u"TBS_MENU_ITEM_PRESS_START", 0)) {
+            const Prompt* p = nullptr;
+            for (const Prompt& k : kKeyboardPrompts)
+                if (text[i + 2] == char16_t(k.code[0]) && text[i + 3] == char16_t(k.code[1])) p = &k;
+            if (p) {
+                AppendUtf16(out, p->text[column]);
+                i += 3;
+                continue;
+            }
+        }
+        out.push_back(uint8_t(text[i]));
+        out.push_back(uint8_t(text[i] >> 8));
+    }
+    return out;
+}
+
+// a string table (UTF-16 lines of key, tab, text) with the menu's lines after its own, as the controller's prompts
+// and as the keyboard's, the same length: the shorter ends in a comment line of spaces
+std::optional<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>> EditStrings(const std::vector<uint8_t>& in, int column,
+                                                                                 const char* name) {
     if (in.size() < 4 || in[0] != 0xFF || in[1] != 0xFE) {
         LOGW("display menu: %s is not a UTF-16 string table", name);
         return std::nullopt;
     }
-    std::vector<uint8_t> out = in;
-    bool ends_with_newline = out[out.size() - 2] == '\n' && out[out.size() - 1] == 0;
-    if (!ends_with_newline) AppendUtf16(out, "\r\n");
+    std::vector<uint8_t> pad = in;
+    bool ends_with_newline = pad[pad.size() - 2] == '\n' && pad[pad.size() - 1] == 0;
+    if (!ends_with_newline) AppendUtf16(pad, "\r\n");
     for (const Text& t : kTexts) {
-        AppendUtf16(out, t.key);
-        AppendUtf16(out, "\t");
-        AppendUtf16(out, t.text[column]);
-        AppendUtf16(out, "\r\n");
+        AppendUtf16(pad, t.key);
+        AppendUtf16(pad, "\t");
+        AppendUtf16(pad, t.text[column]);
+        AppendUtf16(pad, "\r\n");
     }
-    return out;
+    std::vector<uint8_t> keys = KeyboardPrompts(pad, column);
+    const size_t length = std::max(pad.size(), keys.size()) + 6;  // room for the shortest comment line, "#\r\n"
+    for (std::vector<uint8_t>* v : {&pad, &keys}) {
+        AppendUtf16(*v, "#");
+        while (v->size() < length - 4) AppendUtf16(*v, " ");
+        AppendUtf16(*v, "\r\n");
+    }
+    return std::make_pair(std::move(pad), std::move(keys));
 }
 
 uint32_t U32(const std::vector<uint8_t>& b, size_t at) {
@@ -327,6 +383,7 @@ struct RcfView {
         std::vector<uint8_t> bytes;
         bool script;                  // the selections follow the settings, the rest stays
         size_t selection[kSettings];  // a script's named values' digits
+        std::vector<uint8_t> keyboard;  // a string table's keyboard prompts, as long as bytes
     };
     std::vector<Added> added;
 
@@ -338,7 +395,8 @@ struct RcfView {
         overlay(dir_at, dir.data(), dir.size());
         for (const Added& a : added) {
             if (!a.script) {
-                overlay(a.at, a.bytes.data(), a.bytes.size());
+                const auto& b = !a.keyboard.empty() && !g_controller_prompts.load() ? a.keyboard : a.bytes;
+                overlay(a.at, b.data(), b.size());
                 continue;
             }
             char digits[kSettings];
@@ -393,11 +451,11 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
     auto view = std::make_shared<RcfView>();
     view->dir_at = dir_at;
     uint64_t end = (size + kRcfAlign - 1) & ~uint64_t(kRcfAlign - 1);
-    auto add = [&](uint32_t e, std::vector<uint8_t> b, const Script* script) {
+    auto add = [&](uint32_t e, std::vector<uint8_t> b, const Script* script, std::vector<uint8_t> keyboard = {}) {
         uint32_t at = uint32_t(end), n = uint32_t(b.size());
         std::memcpy(dir.data() + e * 12 + 4, &at, 4);
         std::memcpy(dir.data() + e * 12 + 8, &n, 4);
-        RcfView::Added a{end, std::move(b), script != nullptr, {}};
+        RcfView::Added a{end, std::move(b), script != nullptr, {}, std::move(keyboard)};
         if (script) std::copy(std::begin(script->selection), std::end(script->selection), a.selection);
         view->added.push_back(std::move(a));
         end = (end + n + kRcfAlign - 1) & ~uint64_t(kRcfAlign - 1);
@@ -416,7 +474,7 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
         if (!e) continue;  // a release without that language
         auto edited = EditStrings(contents(*e), column, name);
         if (!edited) return nullptr;
-        add(*e, std::move(*edited), nullptr);
+        add(*e, std::move(edited->first), nullptr, std::move(edited->second));
     }
     for (auto& [e, script] : scripts) add(e, std::vector<uint8_t>(script.text.begin(), script.text.end()), &script);
     view->dir = std::move(dir);
@@ -450,6 +508,8 @@ std::shared_ptr<app::FileView> GameFileView(const std::string& path, uint64_t si
     LOGI("display menu: %s serves Options > Display Options (%zu files edited)", path.c_str(), rcf->added.size());
     return view;
 }
+
+void SetControllerPrompts(bool controller) { g_controller_prompts.store(controller); }
 
 void RegisterDisplayCallbacks(X86Context& ctx) {
     if (!g_served.load()) return;  // the game reads its own script, which names none of them

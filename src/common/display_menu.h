@@ -18,6 +18,10 @@ namespace hulk {
 std::shared_ptr<app::FileView> GameFileView(const std::string& path, uint64_t size,
                                             const std::function<size_t(uint64_t, void*, size_t)>& read);
 
+// the button prompts the game reads from then on: a controller's icons, else the keyboard and mouse bindings. The
+// game reads its string tables as it loads, so a change shows from the next load
+void SetControllerPrompts(bool controller);
+
 // registers the frontend callbacks of the selectors, after the game's own (hooks.cpp)
 void RegisterDisplayCallbacks(X86Context& ctx);
 // a frontend int callback through the shared handler: true when it was one of the display selectors

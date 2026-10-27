@@ -138,6 +138,10 @@ int main(int argc, char** argv) {
         Check(t.find("TBS_PC_DISPLAY_OPTIONS\t") != std::string::npos, "string tables have the menu's keys");
         Check(t.find("TBS_MENU_ITEM_OM_CAMERA_OPTIONS\t") != std::string::npos, "string tables keep their own");
     }
+    // without a controller the prompts are the keyboard's; the map legend's icons stay
+    Check(tables[0].find("press [Q] to pick it up") != std::string::npos && tables[0].find("\\bus") == std::string::npos &&
+              tables[0].find("\\bmh Hulk") != std::string::npos,
+          "keyboard prompts in place of the controller's");
     std::string main_menu, pause_menu;
     for (const std::string& s : scripts) (s.find("AddScreen \"main\"") != std::string::npos ? main_menu : pause_menu) = s;
     for (const std::string* script : {&main_menu, &pause_menu}) {
