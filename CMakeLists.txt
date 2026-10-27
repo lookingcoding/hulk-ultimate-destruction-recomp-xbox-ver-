@@ -25,6 +25,11 @@ add_executable(hulk_disasm tools/disasm.cpp)
 target_include_directories(hulk_disasm PRIVATE ${SDK}/runtime)
 target_link_libraries(hulk_disasm PRIVATE Zydis)
 
+# the loader players start: Hulk Recompiled.exe beside assets and game (tools/loader.cpp)
+add_executable(hulk_loader WIN32 tools/loader.cpp)
+set_target_properties(hulk_loader PROPERTIES OUTPUT_NAME "Hulk Recompiled")
+target_link_libraries(hulk_loader PRIVATE shell32)
+
 enable_testing()
 add_executable(hulk_analysis_tests tests/analysis.cpp ${SDK}/tools/recomp/analysis.cpp)
 target_include_directories(hulk_analysis_tests PRIVATE ${SDK}/runtime ${SDK}/tools/recomp)

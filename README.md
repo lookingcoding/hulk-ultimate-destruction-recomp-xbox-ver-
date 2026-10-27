@@ -10,7 +10,7 @@ A native Windows port and static recompilation of the original Xbox version of *
 
 1. Download `HulkRecompiled-<version>-windows-x64.zip` from [Releases](https://github.com/lookingcoding/hulk-ultimate-destruction-recomp-xbox-ver-/releases) and extract it.
 2. Put your Xbox disc image (`.iso`) in the `assets` folder.
-3. Run `Play.bat`.
+3. Run `Hulk Recompiled.exe`. It loads your disc and starts the game; the game itself, its settings and saves are in the `game` folder.
 
 The game checks the disc when it starts: it must be an Xbox disc image of the game with its `default.xbe` on it. Both retail discs of the game work, and the game picks the right build for yours by itself. The first launch builds the game's code from your disc with the included `compiler` folder, which takes a few minutes and needs about 1 GB of free space; later launches start straight away.
 
