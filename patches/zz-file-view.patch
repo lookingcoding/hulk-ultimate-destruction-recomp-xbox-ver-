@@ -1,0 +1,153 @@
+--- a/runtime/app/app.h
++++ b/runtime/app/app.h
+@@ -1,6 +1,8 @@
+ #pragma once
+ #include <cstdint>
+ #include <filesystem>
++#include <functional>
++#include <memory>
+ #include <mutex>
+ #include <string>
+ #include <utility>
+@@ -71,6 +73,12 @@
+ // held around ImGui: the window thread's messages and the renderer's frame
+ std::recursive_mutex& UiLock();
+ 
++// what the game reads of a file in place of its own bytes (GameInfo::file)
++struct FileView {
++    uint64_t size;  // the file as the game sees it: reads past its own end come back zeroed, then go through read
++    std::function<void(uint64_t at, uint8_t* dst, size_t n)> read;  // changes n bytes the game reads from at
++};
++
+ // what the game repo defines once
+ struct Option {  // a setting in the settings file, flag or value
+     const char* key;
+@@ -98,6 +106,9 @@
+     void (*ui)(double fps);        // each frame inside the ImGui frame, UiLock held
+     void (*pad)(int port, input::Pad& pad);  // a polled pad before the game gets it
+     void (*rumble)(int port, uint16_t& left, uint16_t& right);
++    // a file the game opens to read (D:\misc.rcf), with its size and its own bytes: a view changes what the game reads
++    std::shared_ptr<FileView> (*file)(const std::string& path, uint64_t size,
++                                      const std::function<size_t(uint64_t at, void* dst, size_t n)>& read);
+ };
+ extern const GameInfo kGame;
+ 
+--- a/runtime/kernel/files.cpp
++++ b/runtime/kernel/files.cpp
+@@ -6,6 +6,7 @@
+ #include <fstream>
+ #include <map>
+ 
++#include "app/app.h"
+ #include "kernel/disc.h"
+ #include "kernel/kernel.h"
+ #include "kernel/exports.h"
+@@ -90,6 +91,7 @@
+             fs::remove(host, ec);
+         }
+     }
++    std::shared_ptr<app::FileView> view;  // what the game reads of it instead (GameInfo::file)
+ };
+ 
+ struct Link : Object {
+@@ -149,6 +151,22 @@
+ #endif
+ }
+ 
++// the file's own bytes from pos, from the disc image or the host file
++size_t ReadOwn(File& f, uint64_t pos, void* dst, size_t n) {
++    if (f.entry) return MountedDisc()->Read(*f.entry, pos, dst, n);
++    Seek(f.fp, pos);
++    return std::fread(dst, 1, n, f.fp);
++}
++
++// GameInfo::file: the game's code may change what the game reads of a file opened for reading
++void AttachView(File& f) {
++    if (!app::kGame.file || f.dir || (!f.fp && !f.entry)) return;
++    std::error_code ec;
++    uint64_t size = f.entry ? f.entry->size : fs::file_size(f.host, ec);
++    if (ec) return;
++    f.view = app::kGame.file(f.xbox, size, [&f](uint64_t at, void* dst, size_t n) { return ReadOwn(f, at, dst, n); });
++}
++
+ void IoStatus(uint32_t iosb, uint32_t status, uint32_t info) {
+     if (!iosb) return;
+     W32(iosb, status);
+@@ -304,6 +322,7 @@
+     W32(handle_out, NewHandle(f));
+     IoStatus(iosb, kSuccess, 1);
+     LOG_FIRST(400, "open %s", name.c_str());
++    AttachView(*f);
+     return kSuccess;
+ }
+ 
+@@ -425,6 +444,7 @@
+     f->xbox = Normalize(name);
+     f->fp = fp;
+     f->delete_on_close = options & 0x1000;  // FILE_DELETE_ON_CLOSE
++    if (info == 1) AttachView(*f);  // opened as it was, not created or emptied
+     W32(handle_out, NewHandle(f));
+     IoStatus(iosb, kSuccess, info);
+     LOG_FIRST(400, "open %s", name.c_str());
+@@ -456,6 +476,7 @@
+         if (!f->fp) return kAccessDenied;
+     }
+     (void)options;
++    AttachView(*f);
+     W32(handle_out, NewHandle(f));
+     IoStatus(iosb, kSuccess, 1);
+     return kSuccess;
+@@ -476,6 +497,23 @@
+     return o >= 0 ? uint64_t(o) : f.pos;
+ }
+ 
++// a read through the file's view: its own bytes, zeros past its end, then the view's changes
++static uint32_t ReadView(File& f, uint64_t pos, uint32_t buf, uint32_t len, uint32_t pages) {
++    uint64_t size = f.view->size;
++    uint32_t n = pos < size ? uint32_t(std::min<uint64_t>(len, size - pos)) : 0;
++    if (!n) return 0;
++    std::vector<uint8_t> data(n);
++    ReadOwn(f, pos, data.data(), n);
++    f.view->read(pos, data.data(), n);
++    for (uint32_t i = 0; i < n;) {
++        uint32_t at = pages ? R32(pages + i / 0x1000 * 8) + i % 0x1000 : buf + i;
++        uint32_t chunk = pages ? std::min(n - i, 0x1000 - i % 0x1000) : n;
++        std::memcpy(HostPtr(at), data.data() + i, chunk);
++        i += chunk;
++    }
++    return n;
++}
++
+ // pages is the FILE_SEGMENT_ELEMENT array for scatter and gather, 0 for one buffer
+ static uint32_t Transfer(const Args& a, bool write, uint32_t pages) {
+     uint32_t h = a[0], event = a[1], apc = a[2], apc_ctx = a[3], iosb = a[4], buf = a[5], len = a[6], off = a[7];
+@@ -485,6 +523,11 @@
+     ResetEvent(*f);
+     std::lock_guard<std::mutex> lock(f->io);
+     uint64_t pos = Offset(*f, off);
++    if (!write && f->view) {
++        uint32_t n = ReadView(*f, pos, buf, len, pages);
++        f->pos = pos + n;
++        return Finish(*f, len && !n ? kEndOfFile : kSuccess, n, event, apc, apc_ctx, iosb);
++    }
+     if (f->fp) Seek(f->fp, pos);
+     uint32_t n = 0;
+     while (n < len) {
+@@ -518,6 +561,7 @@
+         std::fflush(f->fp);
+         size = fs::file_size(f->host, ec);
+     }
++    if (f->view) size = f->view->size;
+     std::memset(HostPtr(out), 0, len);
+     switch (cls) {
+         case 4: {  // FileBasicInformation
+@@ -539,7 +583,8 @@
+             IoStatus(iosb, kSuccess, 8);
+             return kSuccess;
+         case 34:  // FileNetworkOpenInformation
+-            if (f->entry) FillNetworkInfo(out, *f->entry);
++            if (f->view) FillNetworkInfo(out, f->entry ? MountedDisc()->Time() : ToFileTime(fs::last_write_time(f->host, ec)), size, false);
++            else if (f->entry) FillNetworkInfo(out, *f->entry);
+             else FillNetworkInfo(out, f->host);
+             IoStatus(iosb, kSuccess, 0x38);
+             return kSuccess;

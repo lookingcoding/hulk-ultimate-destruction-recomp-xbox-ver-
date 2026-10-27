@@ -1,11 +1,17 @@
 #include "app/app.h"
-#include "common/keyboard.h"
 #include "common/diagnostics.h"
+#include "common/display_menu.h"
+#include "common/keyboard.h"
 #include "common/settings_ui.h"
 
 namespace {
 void OnWindowReady(void* hwnd) {
     hulk::SetGameWindow(hwnd);
+}
+
+void OnPad(int port, input::Pad& pad) {
+    hulk::TickDisplaySettings();
+    hulk::KeyboardPad(port, pad);
 }
 }  // namespace
 
@@ -26,7 +32,8 @@ const app::GameInfo app::kGame = {
     .loaded = nullptr,                               // image in memory, before its entry point runs
     .window = OnWindowReady,                         // the game window is up
     .message = hulk::KeyboardMessage,
-    .ui = hulk::DrawNativeDisplayUi,                 // 1:1 native-styled display settings UI (no ImGui windows)
-    .pad = hulk::KeyboardPad,
+    .ui = nullptr,                                   // display settings are a screen of the game's own Options
+    .pad = OnPad,
     .rumble = nullptr,                               // changes a rumble before it is set
+    .file = hulk::GameFileView,                      // misc.rcf with the Display Options screen in its frontend
 };

@@ -54,7 +54,7 @@ try {
     }
     Invoke-BuildTool cmake @('--preset','release')
     if ($Stage -eq 'Configure') { return }
-    Invoke-BuildTool cmake @('--build',$build,'--target','xbe_symbols','xbe_recomp','hulk_disasm','hulk_analysis_tests','hulk_input_tests','hulk_kernel_io_tests','--parallel',"$Jobs")
+    Invoke-BuildTool cmake @('--build',$build,'--target','xbe_symbols','xbe_recomp','hulk_disasm','hulk_analysis_tests','hulk_input_tests','hulk_kernel_io_tests','hulk_display_menu_tests','--parallel',"$Jobs")
     Invoke-BuildTool ctest @('--test-dir',$build,'--output-on-failure')
     if ($Stage -eq 'Tools') { return }
     if (!(Test-Path -LiteralPath 'config\game.toml') -or !(Select-String -LiteralPath 'config\game.toml' -Pattern '^\[symbols\]' -Quiet)) {

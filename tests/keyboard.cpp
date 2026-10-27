@@ -2,20 +2,10 @@
 #include <windows.h>
 #include <cstdio>
 #include "common/keyboard.h"
-#include "common/settings_ui.h"
 #include "core/input.h"
 #include "kernel/memory.h"
 
-namespace hulk {
-void ReplayPad(int, input::Pad&) {}
-bool IsDisplayOptionsOpen() { return false; }
-void SetDisplayOptionsOpen(bool) {}
-bool HandleDisplayInputKey(uint32_t, bool) { return false; }
-bool HandleDisplayClick(int, int, int, int, bool) { return false; }
-void HandleDisplayWheel(int) {}
-void HandleDisplayHover(int, int, int, int) {}
-}
-
+namespace hulk { void ReplayPad(int, input::Pad&) {} }
 namespace mem { uint8_t* Base() { return nullptr; } }
 
 static bool Check(bool value, const char* message) {

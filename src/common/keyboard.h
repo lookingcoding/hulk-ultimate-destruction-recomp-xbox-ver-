@@ -1,8 +1,6 @@
 #pragma once
 #include <cstdint>
-
 namespace input { struct Pad; }
-
 namespace hulk {
 void SetGameWindow(void* hwnd);
 void SetMenuModeForTest(int mode);  // -1 = force gameplay, 0 = auto (guest memory), 1 = force menu
@@ -17,10 +15,4 @@ void SetMouseInvertY(bool invert);
 bool GetMouseInvertY();
 void SetMouseSmoothing(bool smoothing);
 bool GetMouseSmoothing();
-
-// Native menu state queries
-bool IsInMenuState();
-bool IsCurrentScreenOptions();
-int GetCurrentMenuSelectedRow();
-void SetCurrentMenuSelectedRow(int row);
 }

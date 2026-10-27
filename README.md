@@ -19,14 +19,13 @@ A native Windows port and static recompilation of the European original Xbox ver
   - Direct 1:1 hit-testing for all native menus: the mouse pointer is directly on the thing you are clicking.
   - Hovering immediately highlights the item under the pointer with zero lag.
   - Clicking on blank background or margins is safely ignored (no unintended selection).
-- **Integrated In-Game Options Menu:**
-  - Integrated directly into the real game's **Options menu** (accessible from the Title Screen and In-Game Pause Menu, or via `F1` / `~`).
-  - **Display Modes:** Borderless Fullscreen, Exclusive Fullscreen, Windowed.
-  - **Resolution Presets:** Desktop Native, 4K UHD (3840x2160), 1440p QHD (2560x1440), 1080p FHD (1920x1080), 900p, 720p, or custom resolutions.
-  - **3D Render Scaling:** 50% to 200% supersampling for crisp, aliasing-free rendering.
-  - **VSync & FPS Cap:** VSync toggle and configurable frame rate caps (30, 60, 120, 144, 165, 240, Uncapped).
-  - **Anisotropic Filtering:** Off, 2x, 4x, 8x, 16x.
-  - Settings persist across launches in `settings.toml`.
+- **Display Options in the game's own Options menu:**
+  - Main menu > Options and the pause menu's Options each have a **Display Options** row, built from the game's own frontend script, art, fonts and transitions, and driven by the controller or keyboard like every other row. Its strings are added in English, French, Spanish and Italian.
+  - **Display Mode:** Fullscreen, Borderless, Windowed.
+  - **Resolution:** Desktop, 1280x720, 1600x900, 1920x1080, 2560x1440, 3840x2160 (a size set in `settings.toml` shows as Custom).
+  - **Frame Rate Limit:** 30, 60, 120, 144, monitor refresh rate, unlimited.
+  - **V-Sync** and **Render Scale** (50% to 200%).
+  - Changes apply once the selection settles and persist in `settings.toml`. The game's files are not modified: the runtime serves edited `frontend\fe_real.txt` (main menu), `frontend\fe_run.txt` (pause menu) and string tables through a view of `misc.rcf` (see `src/common/display_menu.cpp`).
 - **Native D3D12 & 64-bit Recompilation:**
   - Runs natively on modern 64-bit Windows systems.
   - Vertex buffer synchronization, video playback (Bink), and fiber context switching.
@@ -53,7 +52,6 @@ Keyboard and mouse input is mapped to player 1 alongside any connected Xbox/Play
 | **C** | Reset Camera Behind Hulk | Left Stick Click (L3) |
 | **V** | Taunt | Right Stick Click (R3) |
 | **1 / 2** | Cycle Target / Smash Camera | White / Black Buttons |
-| **F1 or ~** | Toggle PC Graphics & Controls Options | *(PC Shortcut)* |
 
 ---
 
