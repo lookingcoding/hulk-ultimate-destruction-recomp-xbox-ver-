@@ -37,7 +37,8 @@ const app::GameInfo app::kGame = {
     .log = "hulk",                                   // log file prefix
     .settings = "settings.toml",                     // settings file beside the exe
     .splash = L"splash",                             // optional splash.png or splash.bmp beside the exe
-    .missing = L"Put the game in the assets folder: its disc image (.iso), or default.xbe with its folders beside it.",
+    .missing = L"No working copy of the game was found. Put your Xbox disc image of The Incredible Hulk: Ultimate "
+               L"Destruction (.iso, any file name) in the assets folder, or default.xbe with its folders beside it.",
     .images = {{"default.xbe", "HulkRecompiled"}},   // each recompiled xbe and its exe, for title launches
     .options = {},                                   // game settings kept in the settings file
     .load = hulk::LoadCustomSettings,                // reads more from the settings file's toml::table

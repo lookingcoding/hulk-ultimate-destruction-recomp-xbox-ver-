@@ -21,6 +21,9 @@ std::shared_ptr<app::FileView> GameFileView(const std::string& path, uint64_t si
 // the button prompts the game reads from then on: a controller's icons, else the keyboard and mouse bindings. The
 // game reads its string tables as it loads, so a change shows from the next load
 void SetControllerPrompts(bool controller);
+// the frontend's bottom prompt's button icons (owner: the frontend), set as those prompts are, before each is drawn:
+// these show a change at once (hooks.cpp)
+void MenuButtonPrompts(uint32_t owner);
 
 // registers the frontend callbacks of the selectors, after the game's own (hooks.cpp)
 void RegisterDisplayCallbacks(X86Context& ctx);

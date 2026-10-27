@@ -14,7 +14,7 @@
 namespace hulk {
 namespace {
 
-// default.xbe (Europe)
+// default.xbe
 constexpr uint32_t kGuestNew = 0x0008D730;             // operator new, cdecl
 constexpr uint32_t kRegisterIntCallback = 0x000FC420;  // cdecl (name, functor): keeps the name's hash and the functor
 constexpr uint32_t kIntFunctorVtable = 0x00409B40;     // functor: vtable, owner, method (thiscall owner, int value)
@@ -164,6 +164,7 @@ std::vector<Option> g_options;  // made once when misc.rcf is first opened, befo
 std::atomic<bool> g_ready{false};   // g_options is made and stays as it is
 std::atomic<bool> g_served{false};  // the game reads the edited script
 std::atomic<bool> g_controller_prompts{false};  // the string tables as the game reads them: controller or keyboard
+std::atomic<int> g_language{0};  // the column of the string table the game read last: its language
 std::atomic<int64_t> g_changed_at{0};  // steady clock ticks of the last unapplied change, 0 for none
 
 // the selection a selector starts at: the current setting's (one digit, the script's bytes keep their length)
@@ -303,11 +304,21 @@ const Prompt kKeyboardPrompts[] = {
     {"la", {"[WASD]", "[WASD]", "[WASD]", "[WASD]"}},                                             // left stick
     {"lr", {"[A/D]", "[A/D]", "[A/D]", "[A/D]"}},                                                 // left stick around
     {"ra", {"[Mouse]", "[Souris]", "[Ratón]", "[Mouse]"}},                                        // right stick
-    {"se", {"[Tab]", "[Tab]", "[Tab]", "[Tab]"}},                                                 // back
+    {"se", {"[Space]", "[Espace]", "[Espacio]", "[Spazio]"}},                                       // A as select
     {"jc", {"[Hold Space]", "[Maintenir Espace]", "[Mantener Espacio]", "[Tenere Spazio]"}},      // A held
     {"uc", {"[Hold Q]", "[Maintenir Q]", "[Mantener Q]", "[Tenere Q]"}},                          // B held
     {"ac", {"[Hold Left Click]", "[Maintenir clic gauche]", "[Mantener clic izquierdo]", "[Tenere clic sinistro]"}},  // X held
     {"sc", {"[Hold E]", "[Maintenir E]", "[Mantener E]", "[Tenere E]"}},                          // Y held
+};
+
+// The frontend's bottom prompt (0x000BCA60) puts each label after its button's icon, text it keeps at owner + 0x1884
+// + button * 0x80 (64 UTF-16 units) from "se", "ba", "de" in default.xbe (0x000C527B): select, back and
+// delete, the menu's A, B and X; keyboard.cpp maps the keys to those buttons
+constexpr uint32_t kMenuIcons = 0x1884, kMenuIconSize = 0x80;
+const Prompt kMenuPrompts[] = {
+    {"se", {"[Enter]", "[Entrée]", "[Intro]", "[Invio]"}},
+    {"ba", {"[Q]", "[Q]", "[Q]", "[Q]"}},
+    {"de", {"[Delete]", "[Suppr]", "[Supr]", "[Canc]"}},
 };
 
 // a string table's lines with each button prompt as its key; the press start line keeps its own
@@ -384,6 +395,7 @@ struct RcfView {
         bool script;                  // the selections follow the settings, the rest stays
         size_t selection[kSettings];  // a script's named values' digits
         std::vector<uint8_t> keyboard;  // a string table's keyboard prompts, as long as bytes
+        int column = -1;                // a string table's language
     };
     std::vector<Added> added;
 
@@ -396,6 +408,7 @@ struct RcfView {
         for (const Added& a : added) {
             if (!a.script) {
                 const auto& b = !a.keyboard.empty() && !g_controller_prompts.load() ? a.keyboard : a.bytes;
+                if (a.column >= 0 && at < a.at + b.size() && a.at < at + n) g_language.store(a.column);
                 overlay(a.at, b.data(), b.size());
                 continue;
             }
@@ -451,11 +464,12 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
     auto view = std::make_shared<RcfView>();
     view->dir_at = dir_at;
     uint64_t end = (size + kRcfAlign - 1) & ~uint64_t(kRcfAlign - 1);
-    auto add = [&](uint32_t e, std::vector<uint8_t> b, const Script* script, std::vector<uint8_t> keyboard = {}) {
+    auto add = [&](uint32_t e, std::vector<uint8_t> b, const Script* script, std::vector<uint8_t> keyboard = {},
+                   int column = -1) {
         uint32_t at = uint32_t(end), n = uint32_t(b.size());
         std::memcpy(dir.data() + e * 12 + 4, &at, 4);
         std::memcpy(dir.data() + e * 12 + 8, &n, 4);
-        RcfView::Added a{end, std::move(b), script != nullptr, {}, std::move(keyboard)};
+        RcfView::Added a{end, std::move(b), script != nullptr, {}, std::move(keyboard), column};
         if (script) std::copy(std::begin(script->selection), std::end(script->selection), a.selection);
         view->added.push_back(std::move(a));
         end = (end + n + kRcfAlign - 1) & ~uint64_t(kRcfAlign - 1);
@@ -474,7 +488,7 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
         if (!e) continue;  // a release without that language
         auto edited = EditStrings(contents(*e), column, name);
         if (!edited) return nullptr;
-        add(*e, std::move(edited->first), nullptr, std::move(edited->second));
+        add(*e, std::move(edited->first), nullptr, std::move(edited->second), column);
     }
     for (auto& [e, script] : scripts) add(e, std::vector<uint8_t>(script.text.begin(), script.text.end()), &script);
     view->dir = std::move(dir);
@@ -510,6 +524,19 @@ std::shared_ptr<app::FileView> GameFileView(const std::string& path, uint64_t si
 }
 
 void SetControllerPrompts(bool controller) { g_controller_prompts.store(controller); }
+
+void MenuButtonPrompts(uint32_t owner) {
+    const bool controller = g_controller_prompts.load();
+    const int column = g_language.load();
+    for (uint32_t i = 0; i < std::size(kMenuPrompts); i++) {
+        std::vector<uint8_t> text;
+        if (controller) AppendUtf16(text, (std::string("") + kMenuPrompts[i].code).c_str());
+        else AppendUtf16(text, kMenuPrompts[i].text[column]);
+        text.push_back(0), text.push_back(0);
+        if (void* icon = kernel::HostPtr(owner + kMenuIcons + i * kMenuIconSize); icon && text.size() <= kMenuIconSize)
+            std::memcpy(icon, text.data(), text.size());
+    }
+}
 
 void RegisterDisplayCallbacks(X86Context& ctx) {
     if (!g_served.load()) return;  // the game reads its own script, which names none of them

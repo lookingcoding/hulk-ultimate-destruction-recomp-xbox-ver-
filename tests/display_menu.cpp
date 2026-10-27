@@ -142,6 +142,7 @@ int main(int argc, char** argv) {
     Check(tables[0].find("press [Q] to pick it up") != std::string::npos && tables[0].find("\\bus") == std::string::npos &&
               tables[0].find("\\bmh Hulk") != std::string::npos,
           "keyboard prompts in place of the controller's");
+    Check(tables[0].find("Press [Space] to start the exercise") != std::string::npos, "the select button's prompt is the A button's key");
     std::string main_menu, pause_menu;
     for (const std::string& s : scripts) (s.find("AddScreen \"main\"") != std::string::npos ? main_menu : pause_menu) = s;
     for (const std::string* script : {&main_menu, &pause_menu}) {

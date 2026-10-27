@@ -100,7 +100,7 @@ try {
         }
         Get-FileHash -LiteralPath $destination -Algorithm SHA256 | Format-List
     }
-    [pscustomobject]@{Image=(Resolve-Path -LiteralPath $Image).Path; Bytes=$stream.Length; Partition=$partition; Files=@($entries | Where-Object { !$_.Directory }).Count} |
+    [pscustomobject]@{Bytes=$stream.Length; Partition=$partition; Files=@($entries | Where-Object { !$_.Directory }).Count} |
         ConvertTo-Json | Set-Content (Join-Path $reports 'disc.json')
     $entries | Where-Object { $_.Path -notmatch '/' } | Sort-Object Path | Format-Table Path,Size,Directory
 } finally { $stream.Dispose() }

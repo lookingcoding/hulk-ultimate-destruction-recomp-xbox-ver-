@@ -1,10 +1,10 @@
 # Hulk Recompiled - work in progress
 
-This is a native Windows port project for the European original Xbox release of The Incredible Hulk: Ultimate Destruction. It is an experimental playable build validated through the opening junkyard tutorial, not yet a verified full-campaign port.
+This is a native Windows port project for the original Xbox version of The Incredible Hulk: Ultimate Destruction. It is an experimental playable build validated through the opening junkyard tutorial, not yet a verified full-campaign port.
 
 Verified input:
 
-- Disc: `D:\Incredible Hulk, The - Ultimate Destruction (Europe) (En,Fr,Es,It)\Incredible Hulk, The - Ultimate Destruction (Europe) (En,Fr,Es,It).xiso.iso`
+- Disc: a retail disc image (`.iso`, any file name) in `assets/`.
 - Disc size: 2,934,767,616 bytes; XDVDFS game partition at offset 0.
 - Title ID: `56550039`; retail entry point: `0020AAC6`.
 - `default.xbe`: 5,210,112 bytes; SHA256 `CE236582A5F65F0732B0EFC612AC83430B2A98276C6FF8763979ABC0E94782F4`.

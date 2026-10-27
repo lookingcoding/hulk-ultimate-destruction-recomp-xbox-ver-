@@ -683,10 +683,12 @@ void KeyboardPad(int port, input::Pad& pad) {
             // In menus:
             // Left Click = Button A (Select)
             // Right Click = Button B (Back)
+            // Delete = Button X (Delete)
             // Mouse Wheel & Cursor Move = D-Pad navigation
             StepTowardTarget(now);
             if (left_pressed || mouse_left.Sample(now)) pad.analog[0] = 255;
             if (right_pressed || mouse_right.Sample(now)) pad.analog[1] = 255;
+            if (Down(VK_DELETE)) pad.analog[2] = 255;
             pad.buttons |= dpad_steps.Sample(now);
             look_dx = 0.0f;
             look_dy = 0.0f;

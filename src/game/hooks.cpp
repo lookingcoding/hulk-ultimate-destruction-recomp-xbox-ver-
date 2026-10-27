@@ -38,3 +38,11 @@ X86_FUNC(sub_000B46B0) {
     }
     __imp__sub_000B46B0(ctx, base);
 }
+
+// the frontend's bottom prompt (thiscall, text, length, label key, button; ret 0x10): appends a button's icon and its
+// label, the icons as display_menu.cpp sets them
+X86_EXTERN_FUNC(__imp__sub_000BCA60);
+X86_FUNC(sub_000BCA60) {
+    hulk::MenuButtonPrompts(ctx.ecx);
+    __imp__sub_000BCA60(ctx, base);
+}
