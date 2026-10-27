@@ -4,6 +4,7 @@
 #include "common/diagnostics.h"
 #include "common/display_menu.h"
 #include "common/keyboard.h"
+#include "common/release.h"
 #include "common/settings_ui.h"
 #include "core/input.h"
 #include "kernel/memory.h"
@@ -18,6 +19,11 @@ constexpr const char* kExe = "HulkRecompiled";     // the European release
 #endif
 
 namespace {
+void OnInit() {
+    hulk::InitDiagnostics();
+    hulk::RunMatchingRelease();  // the other release's game in assets: its own executable runs it
+}
+
 void OnImageLoaded() {
     hulk::KeepCameraInvert();  // Camera Options' Invert X/Y as the player set them, not inverted at first
     // button prompts: a controller's when one is plugged in, before the game reads its strings
@@ -50,7 +56,7 @@ const app::GameInfo app::kGame = {
     .options = {},                                   // game settings kept in the settings file
     .load = hulk::LoadCustomSettings,                // reads more from the settings file's toml::table
     .save = hulk::SaveCustomSettings,                // writes more into it
-    .init = hulk::InitDiagnostics,
+    .init = OnInit,
     .loaded = OnImageLoaded,                         // image in memory, before its entry point runs
     .window = OnWindowReady,                         // the game window is up
     .message = hulk::KeyboardMessage,
