@@ -16,6 +16,8 @@ data_ranges = [[0x3423EC, 0x3423F4]] # "20XC00\0\0" signature preceding _except_
 0x3423F4 = "" # _except_handler3 pushed onto fs:[0] by _SEH_prolog at 0x3423A0
 0x34F465 = "" # thread notification callback reached from 0x20C6DA during boot
 0x34F4E9 = "" # SEH filter in scope table 0x43D310 following noreturn _endthreadex call
+0x32DC48 = "" # resume point after the guarded call at 0x32DC20 installs its VC20 frame (call 0x343534); the frame handler at 0x3435B0 restores esp and jumps here with `jmp [frame+0x14]` when the callback raises
+0x2B9872 = "" # the same resume point for the other guarded call site, at 0x2B9850
 
 [[function]]
 at = 0x34F48F
