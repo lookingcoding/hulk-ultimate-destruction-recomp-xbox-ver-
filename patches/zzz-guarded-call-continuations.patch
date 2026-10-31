@@ -1,0 +1,63 @@
+diff --git a/tools/recomp/analysis.cpp b/tools/recomp/analysis.cpp
+--- a/tools/recomp/analysis.cpp
++++ b/tools/recomp/analysis.cpp
+@@ -567,6 +567,7 @@ void Analysis::Run() {
+         }
+     }
+     EhContinuations();
++    GuardedCallContinuations();
+     // every direct call from decoded code names a function
+     for (bool changed = true; changed;) {
+         changed = false;
+@@ -604,6 +605,40 @@ void Analysis::MakeFunction(uint32_t va) {
+     functions.insert(va);
+ }
+ 
++// A guarded call installs a frame with the "VC20" magic (0x56433230) that stores the caller's esp and return
++// address; the unwind stub restores esp and jumps to that address (0x3435B0: mov esp,[edx+0x10]; add esp,4;
++// jmp [edx+0x14]). The address is in the middle of the calling function, so it is an entry and a continuation at
++// once: the stub's indirect jump throws X86Resume for it, and the calling function's own guard catches that and
++// resumes there, unwinding the host frames of the callback that raised.
++void Analysis::GuardedCallContinuations() {
++    std::set<uint32_t> installers;  // the functions that write the magic
++    for (uint32_t f : functions) {
++        for (uint32_t va : Body(f)) {
++            ZydisDecodedInstruction in;
++            ZydisDecodedOperand ops[ZYDIS_MAX_OPERAND_COUNT];
++            if (!Decode(va, in, ops) || in.mnemonic != ZYDIS_MNEMONIC_MOV) continue;
++            if (ops[0].type != ZYDIS_OPERAND_TYPE_MEMORY || ops[1].type != ZYDIS_OPERAND_TYPE_IMMEDIATE) continue;
++            if (uint32_t(ops[1].imm.value.u) != 0x56433230u) continue;
++            installers.insert(f);
++            break;
++        }
++    }
++    if (installers.empty()) return;
++    size_t added = 0;
++    const std::vector<uint32_t> callers(functions.begin(), functions.end());
++    for (uint32_t f : callers) {
++        for (uint32_t va : Body(f)) {
++            const Insn* in = InsnAt(va);
++            if (!in || in->flow != Flow::Call || !installers.count(in->target)) continue;
++            const uint32_t resume = va + in->len;
++            if (!IsCode(resume)) continue;
++            MakeFunction(resume);
++            if (functions.count(resume) && continuations.insert(resume).second) added++;
++        }
++    }
++    std::fprintf(stderr, "guarded calls: %zu installers, %zu continuations\n", installers.size(), added);
++}
++
+ // MSVC C++ EH: a frame's handler thunk is "mov eax, FuncInfo; jmp __CxxFrameHandler". Its catch blocks and unwind
+ // actions are called through pointers, and a catch block returns in eax where its function resumes.
+ void Analysis::EhContinuations() {
+diff --git a/tools/recomp/analysis.h b/tools/recomp/analysis.h
+--- a/tools/recomp/analysis.h
++++ b/tools/recomp/analysis.h
+@@ -96,6 +96,7 @@ private:
+     void Adopt(const std::vector<uint32_t>& calls, bool trusted);
+     void GapFill();
+     void EhContinuations();
++    void GuardedCallContinuations();
+     void MakeFunction(uint32_t va);
+     bool ReadTable(uint32_t jmp_va, const ZydisDecodedOperand& mem, JumpTable& jt);
+     bool SledTable(uint32_t jmp_va, const uint32_t* ring, int nring, JumpTable& jt);

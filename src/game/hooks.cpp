@@ -9,6 +9,7 @@
 #include "common/addresses.h"
 #include "common/camera.h"
 #include "common/display_menu.h"
+#include "cpu/x86_ops.h"
 #include "xdk/hle.h"
 
 // the frontend's callbacks object (thiscall, owner; ret 4): registers each function the FE scripts name, then the
@@ -84,4 +85,30 @@ X86_FUNC(HULK_SUB_HINT_BEGIN) {
     }
     HULK_IMP(HULK_SUB_HINT_BEGIN)(ctx, base);
     if (patched) X86_MEM32(code) = original;
+}
+
+// The game's guarded call (calls a callback that may raise under a VC20 frame; its unwind stub restores esp and
+// jumps to the saved return address inside this function, config/game.toml). That address is a continuation, so
+// the jump throws X86Resume up the host stack; this frame owns it and resumes there, which unwinds the frames of
+// the callback that raised the way the console's longjmp does. The resumed code runs this function's epilogue.
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_GUARDED_CALL_A));
+X86_FUNC(HULK_SUB_GUARDED_CALL_A) {
+    const uint32_t frame = ctx.esp;
+    try {
+        HULK_IMP(HULK_SUB_GUARDED_CALL_A)(ctx, base);
+    } catch (const X86Resume& r) {
+        if (r.esp >= frame) throw;
+        x86_resume(ctx, base, r);
+    }
+}
+
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_GUARDED_CALL_B));
+X86_FUNC(HULK_SUB_GUARDED_CALL_B) {
+    const uint32_t frame = ctx.esp;
+    try {
+        HULK_IMP(HULK_SUB_GUARDED_CALL_B)(ctx, base);
+    } catch (const X86Resume& r) {
+        if (r.esp >= frame) throw;
+        x86_resume(ctx, base, r);
+    }
 }
