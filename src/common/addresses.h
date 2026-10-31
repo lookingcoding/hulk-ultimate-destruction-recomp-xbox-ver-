@@ -25,6 +25,7 @@ inline constexpr uint32_t kApp = 0x004DD700;                  // the app, its fl
 inline constexpr uint32_t kCameraInvertX = 0x004DD83A, kCameraInvertY = 0x004DD83B;
 inline constexpr uint32_t kFiberTlsIndex = 0x004E5A9C;
 inline constexpr uint32_t kSwitchToFiber = 0x0035551D, kDeleteFiber = 0x0035550A, kFiberBootstrap = 0x00355439;
+inline constexpr uint32_t kHintBegin = 0x000CE700;            // hud_triggerButtonHintBegin
 #define HULK_SUB_FE_CALLBACKS sub_000C43A0  // the frontend's callbacks object
 #define HULK_SUB_AUDIO_QUALITY sub_000BBD10
 #define HULK_SUB_PRINT sub_000B45E0
@@ -33,6 +34,7 @@ inline constexpr uint32_t kSwitchToFiber = 0x0035551D, kDeleteFiber = 0x0035550A
 #define HULK_SUB_DELETE_FIBER sub_0035550A
 #define HULK_SUB_CAMERA_INVERT_X sub_000BBD80  // CameraInvertXChanged
 #define HULK_SUB_CAMERA_INVERT_Y sub_000BBDA0  // CameraInvertYChanged
+#define HULK_SUB_HINT_BEGIN sub_000CE700       // hud_triggerButtonHintBegin
 #else
 inline constexpr uint32_t kGuestNew = 0x0008D730;
 inline constexpr uint32_t kRegisterCallback = 0x000FC400;
@@ -51,6 +53,7 @@ inline constexpr uint32_t kApp = 0x004DF840;
 inline constexpr uint32_t kCameraInvertX = 0x004DF97A, kCameraInvertY = 0x004DF97B;
 inline constexpr uint32_t kFiberTlsIndex = 0x004E7BDC;
 inline constexpr uint32_t kSwitchToFiber = 0x00350EBD, kDeleteFiber = 0x00350EAA, kFiberBootstrap = 0x00350DD9;
+inline constexpr uint32_t kHintBegin = 0x000CE870;            // hud_triggerButtonHintBegin
 #define HULK_SUB_FE_CALLBACKS sub_000C4500
 #define HULK_SUB_AUDIO_QUALITY sub_000BBEC0
 #define HULK_SUB_PRINT sub_000B46B0
@@ -59,6 +62,7 @@ inline constexpr uint32_t kSwitchToFiber = 0x00350EBD, kDeleteFiber = 0x00350EAA
 #define HULK_SUB_DELETE_FIBER sub_00350EAA
 #define HULK_SUB_CAMERA_INVERT_X sub_000BBF30
 #define HULK_SUB_CAMERA_INVERT_Y sub_000BBF50
+#define HULK_SUB_HINT_BEGIN sub_000CE870       // hud_triggerButtonHintBegin
 #endif
 }  // namespace hulk::addr
 

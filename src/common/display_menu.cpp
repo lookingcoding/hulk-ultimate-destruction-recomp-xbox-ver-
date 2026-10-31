@@ -1,4 +1,4 @@
-#include "common/display_menu.h"
+﻿#include "common/display_menu.h"
 #include "common/addresses.h"
 #include <algorithm>
 #include <atomic>
@@ -58,32 +58,32 @@ struct Text {
 
 const Text kTexts[] = {
     {"TBS_PC_DISPLAY_OPTIONS", {"Display Options", "Options d'affichage", "Opciones de pantalla", "Opzioni schermo"}},
-    {"TBS_PC_DISPLAY_MODE", {"Display Mode", "Mode d'affichage", "Modo de pantalla", "Modalità schermo"}},
-    {"TBS_PC_FULLSCREEN", {"Fullscreen", "Plein écran", "Pantalla completa", "Schermo intero"}},
-    {"TBS_PC_BORDERLESS", {"Borderless", "Fenêtre sans bordure", "Ventana sin bordes", "Finestra senza bordi"}},
-    {"TBS_PC_WINDOWED", {"Windowed", "Fenêtré", "Ventana", "Finestra"}},
-    {"TBS_PC_RESOLUTION", {"Resolution", "Résolution", "Resolución", "Risoluzione"}},
+    {"TBS_PC_DISPLAY_MODE", {"Display Mode", "Mode d'affichage", "Modo de pantalla", "ModalitÃ  schermo"}},
+    {"TBS_PC_FULLSCREEN", {"Fullscreen", "Plein Ã©cran", "Pantalla completa", "Schermo intero"}},
+    {"TBS_PC_BORDERLESS", {"Borderless", "FenÃªtre sans bordure", "Ventana sin bordes", "Finestra senza bordi"}},
+    {"TBS_PC_WINDOWED", {"Windowed", "FenÃªtrÃ©", "Ventana", "Finestra"}},
+    {"TBS_PC_RESOLUTION", {"Resolution", "RÃ©solution", "ResoluciÃ³n", "Risoluzione"}},
     {"TBS_PC_RES_DESKTOP", {"Desktop", "Bureau", "Escritorio", "Desktop"}},
     {"TBS_PC_RES_1280X720", {"1280 x 720", "1280 x 720", "1280 x 720", "1280 x 720"}},
     {"TBS_PC_RES_1600X900", {"1600 x 900", "1600 x 900", "1600 x 900", "1600 x 900"}},
     {"TBS_PC_RES_1920X1080", {"1920 x 1080", "1920 x 1080", "1920 x 1080", "1920 x 1080"}},
     {"TBS_PC_RES_2560X1440", {"2560 x 1440", "2560 x 1440", "2560 x 1440", "2560 x 1440"}},
     {"TBS_PC_RES_3840X2160", {"3840 x 2160", "3840 x 2160", "3840 x 2160", "3840 x 2160"}},
-    {"TBS_PC_FRAME_RATE", {"Frame Rate Limit", "Limite d'images", "Límite de fotogramas", "Limite fotogrammi"}},
+    {"TBS_PC_FRAME_RATE", {"Frame Rate Limit", "Limite d'images", "LÃ­mite de fotogramas", "Limite fotogrammi"}},
     {"TBS_PC_FPS_30", {"30", "30", "30", "30"}},
     {"TBS_PC_FPS_60", {"60", "60", "60", "60"}},
     {"TBS_PC_FPS_120", {"120", "120", "120", "120"}},
     {"TBS_PC_FPS_144", {"144", "144", "144", "144"}},
-    {"TBS_PC_FPS_REFRESH", {"Refresh Rate", "Fréquence de l'écran", "Frecuencia de pantalla", "Frequenza schermo"}},
-    {"TBS_PC_FPS_UNLIMITED", {"Unlimited", "Illimitée", "Ilimitado", "Illimitato"}},
-    {"TBS_PC_VSYNC", {"V-Sync", "Synchro verticale", "Sincronización vertical", "Sincronia verticale"}},
-    {"TBS_PC_RENDER_SCALE", {"Render Scale", "Échelle de rendu", "Escala de renderizado", "Scala di rendering"}},
+    {"TBS_PC_FPS_REFRESH", {"Refresh Rate", "FrÃ©quence de l'Ã©cran", "Frecuencia de pantalla", "Frequenza schermo"}},
+    {"TBS_PC_FPS_UNLIMITED", {"Unlimited", "IllimitÃ©e", "Ilimitado", "Illimitato"}},
+    {"TBS_PC_VSYNC", {"V-Sync", "Synchro verticale", "SincronizaciÃ³n vertical", "Sincronia verticale"}},
+    {"TBS_PC_RENDER_SCALE", {"Render Scale", "Ã‰chelle de rendu", "Escala de renderizado", "Scala di rendering"}},
     {"TBS_PC_SCALE_50", {"50%", "50 %", "50%", "50%"}},
     {"TBS_PC_SCALE_75", {"75%", "75 %", "75%", "75%"}},
     {"TBS_PC_SCALE_100", {"100%", "100 %", "100%", "100%"}},
     {"TBS_PC_SCALE_150", {"150%", "150 %", "150%", "150%"}},
     {"TBS_PC_SCALE_200", {"200%", "200 %", "200%", "200%"}},
-    {"TBS_PC_CUSTOM", {"Custom", "Personnalisé", "Personalizado", "Personalizzato"}},
+    {"TBS_PC_CUSTOM", {"Custom", "PersonnalisÃ©", "Personalizado", "Personalizzato"}},
 };
 
 // the string tables and the column of kTexts each takes
@@ -317,10 +317,10 @@ const Prompt kKeyboardPrompts[] = {
     {"at", {"[Left Click]", "[Clic gauche]", "[Clic izquierdo]", "[Clic sinistro]"}},             // X
     {"sp", {"[E]", "[E]", "[E]", "[E]"}},                                                         // Y
     {"ta", {"[Right Click]", "[Clic droit]", "[Clic derecho]", "[Clic destro]"}},                 // left trigger
-    {"ru", {"[Shift]", "[Maj]", "[Mayús]", "[Maiusc]"}},                                          // right trigger
+    {"ru", {"[Shift]", "[Maj]", "[MayÃºs]", "[Maiusc]"}},                                          // right trigger
     {"la", {"[WASD]", "[WASD]", "[WASD]", "[WASD]"}},                                             // left stick
     {"lr", {"[A/D]", "[A/D]", "[A/D]", "[A/D]"}},                                                 // left stick around
-    {"ra", {"[Mouse]", "[Souris]", "[Ratón]", "[Mouse]"}},                                        // right stick
+    {"ra", {"[Mouse]", "[Souris]", "[RatÃ³n]", "[Mouse]"}},                                        // right stick
     {"se", {"[Space]", "[Espace]", "[Espacio]", "[Spazio]"}},                                       // A as select
     {"jc", {"[Hold Space]", "[Maintenir Espace]", "[Mantener Espacio]", "[Tenere Spazio]"}},      // A held
     {"uc", {"[Hold Q]", "[Maintenir Q]", "[Mantener Q]", "[Tenere Q]"}},                          // B held
@@ -333,7 +333,7 @@ const Prompt kKeyboardPrompts[] = {
 // delete, the menu's A, B and X; keyboard.cpp maps the keys to those buttons
 constexpr uint32_t kMenuIcons = 0x1884, kMenuIconSize = 0x80;
 const Prompt kMenuPrompts[] = {
-    {"se", {"[Enter]", "[Entrée]", "[Intro]", "[Invio]"}},
+    {"se", {"[Enter]", "[EntrÃ©e]", "[Intro]", "[Invio]"}},
     {"ba", {"[Q]", "[Q]", "[Q]", "[Q]"}},
     {"de", {"[Delete]", "[Suppr]", "[Supr]", "[Canc]"}},
 };
@@ -343,10 +343,10 @@ const Prompt kMenuPrompts[] = {
 // splash screen's "Press START" would name a button a keyboard has not got)
 const Text kKeyboardLines[] = {
     {"TBS_MENU_ITEM_PRESS_START", {"[Space] Start", "[Espace] Start", "[Espacio] Start", "[Spazio] Start"}},
-    {"TBS_MENU_ITEM_PRESS_START2", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
-    {"TBS_MENU_ITEM_PRESS_START2_XBOX", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
-    {"TBS_MENU_ITEM_PRESS_START2_GC", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
-    {"TBS_MENU_ITEM_PRESS_START2_PS2", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START2", {"Press Enter", "Appuyez sur EntrÃ©e", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START2_XBOX", {"Press Enter", "Appuyez sur EntrÃ©e", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START2_GC", {"Press Enter", "Appuyez sur EntrÃ©e", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START2_PS2", {"Press Enter", "Appuyez sur EntrÃ©e", "Pulse Intro", "Premi Invio"}},
     {"TBS_MENU_ITEM_PRESS_START3", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
     {"TBS_MENU_ITEM_PRESS_START3_XBOX", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
     {"TBS_MENU_ITEM_PRESS_START3_GC", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
@@ -359,6 +359,33 @@ bool KeyIs(const std::u16string& key, const char* name) {
     for (size_t i = 0; i < n; i++)
         if (key[i] != char16_t(uint8_t(name[i]))) return false;
     return true;
+}
+
+bool StartsWith(const std::u16string& key, const char* prefix) {
+    const size_t n = std::strlen(prefix);
+    if (key.size() < n) return false;
+    for (size_t i = 0; i < n; i++)
+        if (key[i] != char16_t(uint8_t(prefix[i]))) return false;
+    return true;
+}
+
+// The HUD's mission hints (hud_triggerButtonHintBegin in the mission scenarios) draw a controller button's icon
+// and then the instruction text, which is one of these keys. Their scenarios use exactly three buttons: A
+// ("\bse": acquire, enter, hint, jump, mission select), Y ("\bsp": break free, hammer toss, weaponize) and
+// B ("\bus": drop); the icon is left out with the keyboard's prompts (hooks.cpp) and the key names the button
+// first, here, in the instruction's own line.
+const Text kHintKeys[] = {
+    {"TBS_INSTRUCTION_BREAK_FREE", {"[E] ", "[E] ", "[E] ", "[E] "}},
+    {"TBS_INSTRUCTION_HAMMERTOSS", {"[E] ", "[E] ", "[E] ", "[E] "}},
+    {"TBS_INSTRUCTION_WEAPONIZE", {"[E] ", "[E] ", "[E] ", "[E] "}},
+    {"TBS_INSTRUCTION_DROP", {"[Q] ", "[Q] ", "[Q] ", "[Q] "}},
+};
+
+const char* HintLabel(const std::u16string& key, int column) {
+    for (const Text& t : kHintKeys)
+        if (KeyIs(key, t.key)) return t.text[column];
+    static const char* const kSpace[4] = {"[Space] ", "[Espace] ", "[Espacio] ", "[Spazio] "};
+    return kSpace[column];
 }
 
 // a string table's lines with each button prompt as its key, its press start lines in the keyboard's words
@@ -385,6 +412,21 @@ std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column)
                     AppendUtf16(out, "\r\n");
                     line_end = end;
                     break;
+                }
+                if (!line_end && StartsWith(line_key, "TBS_INSTRUCTION_")) {
+                    // the HUD's hint text: the key that does it, then the instruction as the game wrote it
+                    const size_t from = tab + 1;
+                    std::u16string rest = text.substr(from, end - from);
+                    while (!rest.empty() && (rest.back() == u'\r' || rest.back() == u'\n')) rest.pop_back();
+                    AppendUtf16(out, std::string(line_key.begin(), line_key.end()).c_str());
+                    AppendUtf16(out, "\t");
+                    AppendUtf16(out, HintLabel(line_key, column));
+                    for (char16_t c : rest) {
+                        out.push_back(uint8_t(c));
+                        out.push_back(uint8_t(c >> 8));
+                    }
+                    AppendUtf16(out, "\r\n");
+                    line_end = end;
                 }
                 if (line_end) i = line_end - 1;
             }
@@ -589,6 +631,8 @@ std::shared_ptr<app::FileView> GameFileView(const std::string& path, uint64_t si
 
 void SetControllerPrompts(bool controller) { g_controller_prompts.store(controller); }
 
+bool ControllerPrompts() { return g_controller_prompts.load(); }
+
 PromptDevice GetPromptDevice() { return PromptDevice(g_prompt_device.load()); }
 
 void SetPromptDevice(PromptDevice device) {
@@ -603,6 +647,8 @@ const char* PromptDeviceName(PromptDevice device) {
         default: return "auto";
     }
 }
+
+// an empty string in the guest's memory, for the HUD hints whose button icon the keyboard's prompts leave out
 
 void MenuButtonPrompts(uint32_t owner) {
     const bool controller = g_controller_prompts.load();
@@ -678,3 +724,4 @@ void TickDisplaySettings() {
 }
 
 }  // namespace hulk
+

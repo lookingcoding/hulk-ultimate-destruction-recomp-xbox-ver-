@@ -148,6 +148,10 @@ int main(int argc, char** argv) {
               tables[0].find("TBS_MENU_ITEM_PRESS_START3\tPress any key") != std::string::npos &&
               tables[0].find("TBS_MENU_ITEM_PRESS_START\t[Space] Start") != std::string::npos,
           "the title screen asks for Enter and any key, not START or a controller glyph");
+    Check(tables[0].find("TBS_INSTRUCTION_JUMP_CITY\t[Space] Jump to City") != std::string::npos &&
+              tables[0].find("TBS_INSTRUCTION_DROP\t[Q] Drop Item") != std::string::npos &&
+              tables[0].find("TBS_INSTRUCTION_WEAPONIZE\t[E] Weaponize") != std::string::npos,
+          "the HUD's hint lines name the key that does it");
     std::string main_menu, pause_menu;
     for (const std::string& s : scripts) (s.find("AddScreen \"main\"") != std::string::npos ? main_menu : pause_menu) = s;
     for (const std::string* script : {&main_menu, &pause_menu}) {

@@ -61,3 +61,27 @@ X86_FUNC(HULK_SUB_MENU_PROMPT) {
     hulk::MenuButtonPrompts(ctx.ecx);
     HULK_IMP(HULK_SUB_MENU_PROMPT)(ctx, base);
 }
+
+// hud_triggerButtonHintBegin (the button's code, the instruction's key): the HUD's mission hints draw that button's
+// icon from the hashed name of its code ("\bse" is the A button), a controller's. With the keyboard's prompts the
+// code is blanked, so only the instruction's text shows, and display_menu.cpp gives it the key's name first
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_HINT_BEGIN));
+X86_FUNC(HULK_SUB_HINT_BEGIN) {
+    uint32_t code = 0, original = 0;
+    bool patched = false;
+    if (!hulk::ControllerPrompts()) {
+        // "\bse": the HUD looks the icon up by that name. A space in the escape's place names nothing, so only the
+        // instruction's text is drawn, and that carries the key. The scenario's own bytes are put back after the
+        // call, which only hashes the name
+        code = X86_MEM32(ctx.esp + 4);
+        if (code) {
+            original = X86_MEM32(code);
+            if ((original & 0xFF) == 0x08) {
+                X86_MEM32(code) = (original & 0xFFFFFF00) | ' ';
+                patched = true;
+            }
+        }
+    }
+    HULK_IMP(HULK_SUB_HINT_BEGIN)(ctx, base);
+    if (patched) X86_MEM32(code) = original;
+}
