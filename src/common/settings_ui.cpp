@@ -1,6 +1,7 @@
 #include "common/settings_ui.h"
 #include <toml++/toml.hpp>
 #include "common/camera.h"
+#include "common/display_menu.h"
 #include "common/keyboard.h"
 
 namespace hulk {
@@ -18,6 +19,13 @@ void LoadCustomSettings(const void* table_ptr) {
         SetMouseSmoothing(*v);
     }
     SetCameraInvert(t["camera_invert_x"].value_or(false), t["camera_invert_y"].value_or(false));
+    // whose button prompts to show: a controller's when one is connected, the keyboard's, or one of them always
+    if (auto v = t["button_prompts"].value<std::string>()) {
+        PromptDevice device = PromptDevice::Auto;
+        if (*v == "keyboard") device = PromptDevice::Keyboard;
+        else if (*v == "controller") device = PromptDevice::Controller;
+        SetPromptDevice(device);
+    }
 }
 
 void SaveCustomSettings(void* table_ptr) {
@@ -28,6 +36,7 @@ void SaveCustomSettings(void* table_ptr) {
     t.insert_or_assign("mouse_smoothing", GetMouseSmoothing());
     t.insert_or_assign("camera_invert_x", GetCameraInvertX());  // Camera Options, as the player set them (camera.h)
     t.insert_or_assign("camera_invert_y", GetCameraInvertY());
+    t.insert_or_assign("button_prompts", std::string(PromptDeviceName(GetPromptDevice())));
 }
 
 }  // namespace hulk

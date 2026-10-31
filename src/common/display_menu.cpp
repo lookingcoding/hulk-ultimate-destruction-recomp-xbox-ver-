@@ -166,6 +166,7 @@ std::vector<Option> g_options;  // made once when misc.rcf is first opened, befo
 std::atomic<bool> g_ready{false};   // g_options is made and stays as it is
 std::atomic<bool> g_served{false};  // the game reads the edited script
 std::atomic<bool> g_controller_prompts{false};  // the string tables as the game reads them: controller or keyboard
+std::atomic<int> g_prompt_device{0};  // PromptDevice: automatic unless settings.toml says otherwise
 std::atomic<int> g_language{0};  // the column of the string table the game read last: its language
 std::atomic<int64_t> g_changed_at{0};  // steady clock ticks of the last unapplied change, 0 for none
 
@@ -337,14 +338,59 @@ const Prompt kMenuPrompts[] = {
     {"de", {"[Delete]", "[Suppr]", "[Supr]", "[Canc]"}},
 };
 
-// a string table's lines with each button prompt as its key; the press start line keeps its own
+// the game's lines that name a controller button in words rather than as a \b glyph: the keyboard's wording, from
+// keyboard.cpp's bindings (A and select are Space or Enter, START is Escape, so Enter starts the title and the
+// splash screen's "Press START" would name a button a keyboard has not got)
+const Text kKeyboardLines[] = {
+    {"TBS_MENU_ITEM_PRESS_START", {"[Space] Start", "[Espace] Start", "[Espacio] Start", "[Spazio] Start"}},
+    {"TBS_MENU_ITEM_PRESS_START2", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START2_XBOX", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START2_GC", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START2_PS2", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START3", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
+    {"TBS_MENU_ITEM_PRESS_START3_XBOX", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
+    {"TBS_MENU_ITEM_PRESS_START3_GC", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
+    {"TBS_MENU_ITEM_PRESS_START3_PS2", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
+};
+
+bool KeyIs(const std::u16string& key, const char* name) {
+    const size_t n = std::strlen(name);
+    if (key.size() != n) return false;
+    for (size_t i = 0; i < n; i++)
+        if (key[i] != char16_t(uint8_t(name[i]))) return false;
+    return true;
+}
+
+// a string table's lines with each button prompt as its key, its press start lines in the keyboard's words
 std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column) {
     std::vector<uint8_t> out(in.begin(), in.begin() + 2);
     std::u16string text(reinterpret_cast<const char16_t*>(in.data() + 2), (in.size() - 2) / 2);
     std::u16string line_key;
+    size_t line_end = 0;  // where the rewritten line ends, when one was
     for (size_t i = 0; i < text.size(); i++) {
-        if (i == 0 || text[i - 1] == u'\n') line_key = text.substr(i, text.find(u'\t', i) - i);
-        if (text[i] == u'\\' && i + 3 < text.size() && text[i + 1] == u'b' && line_key.rfind(u"TBS_MENU_ITEM_PRESS_START", 0)) {
+        if (i == 0 || text[i - 1] == u'\n') {
+            size_t tab = text.find(u'\t', i);
+            const size_t newline = text.find(u'\n', i);
+            if (tab == std::u16string::npos || (newline != std::u16string::npos && tab > newline)) tab = std::u16string::npos;
+            line_key = text.substr(i, tab == std::u16string::npos ? 0 : tab - i);
+            line_end = 0;
+            if (tab != std::u16string::npos) {
+                size_t end = text.find(u'\n', i);
+                end = end == std::u16string::npos ? text.size() : end + 1;
+                for (const Text& k : kKeyboardLines) {
+                    if (!KeyIs(line_key, k.key)) continue;
+                    AppendUtf16(out, k.key);
+                    AppendUtf16(out, "\t");
+                    AppendUtf16(out, k.text[column]);
+                    AppendUtf16(out, "\r\n");
+                    line_end = end;
+                    break;
+                }
+                if (line_end) i = line_end - 1;
+            }
+            if (line_end) continue;
+        }
+        if (text[i] == u'\\' && i + 3 < text.size() && text[i + 1] == u'b') {
             const Prompt* p = nullptr;
             for (const Prompt& k : kKeyboardPrompts)
                 if (text[i + 2] == char16_t(k.code[0]) && text[i + 3] == char16_t(k.code[1])) p = &k;
@@ -542,6 +588,21 @@ std::shared_ptr<app::FileView> GameFileView(const std::string& path, uint64_t si
 }
 
 void SetControllerPrompts(bool controller) { g_controller_prompts.store(controller); }
+
+PromptDevice GetPromptDevice() { return PromptDevice(g_prompt_device.load()); }
+
+void SetPromptDevice(PromptDevice device) {
+    g_prompt_device.store(int(device));
+    if (device != PromptDevice::Auto) SetControllerPrompts(device == PromptDevice::Controller);
+}
+
+const char* PromptDeviceName(PromptDevice device) {
+    switch (device) {
+        case PromptDevice::Keyboard: return "keyboard";
+        case PromptDevice::Controller: return "controller";
+        default: return "auto";
+    }
+}
 
 void MenuButtonPrompts(uint32_t owner) {
     const bool controller = g_controller_prompts.load();

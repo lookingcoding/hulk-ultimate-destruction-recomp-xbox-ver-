@@ -19,6 +19,15 @@ constexpr const char* kExe = "HulkRecompiled";     // the European release
 #endif
 
 namespace {
+// whose button prompts the string tables carry: settings.toml's button_prompts, or by what is plugged in
+void ApplyPrompts(bool controller) {
+    switch (hulk::GetPromptDevice()) {
+        case hulk::PromptDevice::Keyboard: hulk::SetControllerPrompts(false); break;
+        case hulk::PromptDevice::Controller: hulk::SetControllerPrompts(true); break;
+        default: hulk::SetControllerPrompts(controller); break;
+    }
+}
+
 void OnInit() {
     hulk::InitDiagnostics();
     hulk::RunMatchingRelease();  // the other release's game in assets: its own executable runs it
@@ -27,7 +36,7 @@ void OnInit() {
 void OnImageLoaded() {
     hulk::KeepCameraInvert();  // Camera Options' Invert X/Y as the player set them, not inverted at first
     // button prompts: a controller's when one is plugged in, before the game reads its strings
-    hulk::SetControllerPrompts(SDL_HasGamepad());
+    ApplyPrompts(SDL_HasGamepad());
 }
 
 void OnWindowReady(void* hwnd) {
@@ -37,7 +46,7 @@ void OnWindowReady(void* hwnd) {
 void OnPad(int port, input::Pad& pad) {
     hulk::TickDisplaySettings();
     hulk::KeepCameraInvert();
-    if (port == 0) hulk::SetControllerPrompts(pad.connected);  // a physical controller; keyboard input joins after
+    if (port == 0) ApplyPrompts(pad.connected);  // a physical controller; keyboard input joins after
     hulk::KeyboardPad(port, pad);
 }
 }  // namespace
