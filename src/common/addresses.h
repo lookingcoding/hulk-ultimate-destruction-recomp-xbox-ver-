@@ -37,6 +37,9 @@ inline constexpr uint32_t kHintBegin = 0x000CE700;            // hud_triggerButt
 #define HULK_SUB_HINT_BEGIN sub_000CE700       // hud_triggerButtonHintBegin
 inline constexpr uint32_t kFrameSwapVBlanks = 0x0055549C;     // vertical blanks since the last swap
 inline constexpr uint32_t kFrameSwapOneVBlank = 0x005554A0;   // byte: wait for one blank, not two (loading)
+inline constexpr uint32_t kSetTexCoordIndex = 0x00385D40;     // D3DDevice_SetTextureState_TexCoordIndex
+inline constexpr uint32_t kTextureStates = 0x0039DB10;        // D3D_DeferredTextureState, [4][32]
+#define HULK_SUB_POST_EFFECT sub_00325110      // thiscall: the bloom pass over the finished scene
 #define HULK_SUB_FRAME_SWAP sub_0031B190       // thiscall: waits for the blanks, then D3DDevice_Swap
 #define HULK_SUB_GUARDED_CALL_A sub_002152F0   // the guarded call whose resume point is 0x215318
 #define HULK_SUB_GUARDED_CALL_B sub_002D6F10   // the guarded call whose resume point is 0x2D6F32
@@ -70,6 +73,9 @@ inline constexpr uint32_t kHintBegin = 0x000CE870;            // hud_triggerButt
 #define HULK_SUB_HINT_BEGIN sub_000CE870       // hud_triggerButtonHintBegin
 inline constexpr uint32_t kFrameSwapVBlanks = 0x004F8020;
 inline constexpr uint32_t kFrameSwapOneVBlank = 0x004F8024;
+inline constexpr uint32_t kSetTexCoordIndex = 0x00386800;
+inline constexpr uint32_t kTextureStates = 0x0039E5D0;
+#define HULK_SUB_POST_EFFECT sub_00226720
 #define HULK_SUB_FRAME_SWAP sub_0021F300
 #define HULK_SUB_GUARDED_CALL_A sub_0032DC20   // the guarded call whose resume point is 0x32DC48
 #define HULK_SUB_GUARDED_CALL_B sub_002B9850   // the guarded call whose resume point is 0x2B9872

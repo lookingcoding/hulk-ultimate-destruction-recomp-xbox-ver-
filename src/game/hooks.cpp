@@ -123,3 +123,24 @@ X86_FUNC(HULK_SUB_FRAME_SWAP) {
     X86_MEM8(hulk::addr::kFrameSwapOneVBlank) = 0;
     HULK_IMP(HULK_SUB_FRAME_SWAP)(ctx, base);
 }
+
+// The bloom pass draws screen quads whose stages read their own texture coordinates, and never sets that: it trusts
+// what the scene left. A scene object can leave stage 1 reading set 0, and the game's cached setter then keeps it, so
+// the pass samples the 640x480 scene with the bloom texture's 160x120 coordinates: the top left quarter blown up under
+// a bloom of the right size, in flashes (issue #2). The pass gets the coordinates it means; the scene's values go back
+// after it, since that cache still believes them.
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_POST_EFFECT));
+X86_FUNC(HULK_SUB_POST_EFFECT) {
+    constexpr uint32_t kStages = 4, kStageStates = 0x80, kTexCoordIndex = 0x1C * 4;
+    const auto state = [](uint32_t stage) { return hulk::addr::kTextureStates + stage * kStageStates + kTexCoordIndex; };
+    uint32_t scene[kStages];
+    for (uint32_t s = 0; s < kStages; s++) {
+        scene[s] = X86_MEM32(state(s));
+        if (scene[s] != s) kernel::CallGuest(ctx, hulk::addr::kSetTexCoordIndex, {s, s});
+    }
+    HULK_IMP(HULK_SUB_POST_EFFECT)(ctx, base);
+    const uint32_t result = ctx.eax;
+    for (uint32_t s = 0; s < kStages; s++)
+        if (scene[s] != s) kernel::CallGuest(ctx, hulk::addr::kSetTexCoordIndex, {s, scene[s]});
+    ctx.eax = result;
+}
