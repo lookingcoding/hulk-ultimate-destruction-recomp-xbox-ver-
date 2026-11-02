@@ -33,7 +33,7 @@ The game checks your disc image when it starts and tells you if it can't use it.
   - Main menu > Options and the pause menu's Options each have a **Display Options** row, built from the game's own frontend script, art, fonts and transitions, and driven by the controller or keyboard like every other row. Its strings are added in English, French, Spanish and Italian.
   - **Display Mode:** Fullscreen, Borderless, Windowed.
   - **Resolution:** Desktop, 1280x720, 1600x900, 1920x1080, 2560x1440, 3840x2160 (a size set in `settings.toml` shows as Custom).
-  - **Frame Rate Limit:** 30, 60, 120, 144, monitor refresh rate, unlimited.
+  - **Frame Rate Limit:** 30, 60, 120, 144, monitor refresh rate, unlimited. 60 is the default and the most tested choice; above 60 is less tested.
   - **V-Sync** and **Render Scale** (50% to 200%).
 - `settings.toml` also takes `aspect = "auto" | "4:3" | "16:9"`: the game draws 4:3, so on a widescreen output `"4:3"` shows it pillarboxed instead of stretched (the automatic default reports a widescreen TV to the game, which this title does not use).
   - Changes apply once the selection settles and persist in `settings.toml`. The game's files are not modified: the runtime serves edited `frontend\fe_real.txt` (main menu), `frontend\fe_run.txt` (pause menu) and string tables through a view of `misc.rcf` (see `src/common/display_menu.cpp`).

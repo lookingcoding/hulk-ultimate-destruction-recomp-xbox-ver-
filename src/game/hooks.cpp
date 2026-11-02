@@ -112,3 +112,14 @@ X86_FUNC(HULK_SUB_GUARDED_CALL_B) {
         x86_resume(ctx, base, r);
     }
 }
+
+// The game's frame swap waits until two vertical blanks have passed since the last swap, which is its 30 fps limit
+// in gameplay, or one while loading. Its simulation steps by measured time, so no logic needs that pace: the swap is
+// told the blanks have passed and the frame rate is the player's setting, kept by app::Pace after D3DDevice_Swap.
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FRAME_SWAP));
+X86_FUNC(HULK_SUB_FRAME_SWAP) {
+    constexpr uint32_t kBlanksPassed = 2;
+    X86_MEM32(hulk::addr::kFrameSwapVBlanks) = kBlanksPassed;
+    X86_MEM8(hulk::addr::kFrameSwapOneVBlank) = 0;
+    HULK_IMP(HULK_SUB_FRAME_SWAP)(ctx, base);
+}
