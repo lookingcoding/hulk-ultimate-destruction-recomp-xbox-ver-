@@ -1,8 +1,10 @@
 #include "common/settings_ui.h"
+#include <algorithm>
 #include <toml++/toml.hpp>
 #include "common/camera.h"
 #include "common/display_menu.h"
 #include "common/keyboard.h"
+#include "common/view.h"
 
 namespace hulk {
 
@@ -26,6 +28,10 @@ void LoadCustomSettings(const void* table_ptr) {
         else if (*v == "controller") device = PromptDevice::Controller;
         SetPromptDevice(device);
     }
+    // field of view: degrees added to the game's; render distance: percent of the game's far and fog planes (view.h)
+    if (auto v = t["fov_increase"].value<int64_t>()) SetFovIncrease(int(std::clamp<int64_t>(*v, 0, kMaxFovIncrease)));
+    if (auto v = t["render_distance"].value<int64_t>())
+        SetRenderDistance(int(std::clamp<int64_t>(*v, kMinRenderDistance, kMaxRenderDistance)));
 }
 
 void SaveCustomSettings(void* table_ptr) {
@@ -37,6 +43,8 @@ void SaveCustomSettings(void* table_ptr) {
     t.insert_or_assign("camera_invert_x", GetCameraInvertX());  // Camera Options, as the player set them (camera.h)
     t.insert_or_assign("camera_invert_y", GetCameraInvertY());
     t.insert_or_assign("button_prompts", std::string(PromptDeviceName(GetPromptDevice())));
+    t.insert_or_assign("fov_increase", int64_t(GetFovIncrease()));
+    t.insert_or_assign("render_distance", int64_t(GetRenderDistance()));
 }
 
 }  // namespace hulk

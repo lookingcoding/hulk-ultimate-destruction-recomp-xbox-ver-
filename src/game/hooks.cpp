@@ -6,9 +6,12 @@
 // X86_FUNC(sub_00012345) {
 //     __imp__sub_00012345(ctx, base);  // the original
 // }
+#include <bit>
 #include "common/addresses.h"
 #include "common/camera.h"
 #include "common/display_menu.h"
+#include "common/view.h"
+#include "core/log.h"
 #include "cpu/x86_ops.h"
 #include "xdk/hle.h"
 
@@ -143,4 +146,66 @@ X86_FUNC(HULK_SUB_POST_EFFECT) {
     for (uint32_t s = 0; s < kStages; s++)
         if (scene[s] != s) kernel::CallGuest(ctx, hulk::addr::kSetTexCoordIndex, {s, scene[s]});
     ctx.eax = result;
+}
+
+// Field of view and render distance (view.h). The render manager keeps the camera the game gives it (fov at +0x5C,
+// aspect, near, far at +0x68) and hands it to its render layer when the byte at +0x6C is clear, which the game does
+// whenever the camera changes. A changed setting clears it too, so a still camera (a paused game) shows it at once.
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_RENDER_FRAME));
+X86_FUNC(HULK_SUB_RENDER_FRAME) {
+    constexpr uint32_t kViewSet = 0x6C;
+    static uint32_t applied = 0;
+    if (const uint32_t generation = hulk::ViewGeneration(); generation != applied) {
+        const uint32_t manager = X86_MEM32(hulk::addr::kRenderManager);
+        if (manager && X86_MEM32(manager)) {
+            X86_MEM8(manager + kViewSet) = 0;
+            applied = generation;
+        }
+    }
+    HULK_IMP(HULK_SUB_RENDER_FRAME)(ctx, base);
+}
+
+// The render layer's camera (thiscall: transform, fov, aspect, near, far; ret 0x14). The layer gives them to its
+// Pure3D camera, which builds the projection and frustum from them, and works out its own culling angles from the
+// same fov, so widening the field here widens what is drawn and what is kept. The far plane moves out with the render
+// distance. The arguments are the caller's copies; the render manager keeps the game's own values.
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_SET_VIEW));
+X86_FUNC(HULK_SUB_SET_VIEW) {
+    constexpr uint32_t kFov = 8, kFar = 0x14;
+    const float fov = std::bit_cast<float>(uint32_t(X86_MEM32(ctx.esp + kFov)));
+    const float far_plane = std::bit_cast<float>(uint32_t(X86_MEM32(ctx.esp + kFar)));
+    const float wide = hulk::AdjustFov(fov), distant = hulk::AdjustDistance(far_plane);
+    static uint32_t logged = ~0u;
+    if (const uint32_t generation = hulk::ViewGeneration(); generation != logged) {
+        logged = generation;
+        LOGI("view: fov %.1f -> %.1f degrees, far plane %.0f -> %.0f", fov * 57.29578f, wide * 57.29578f, far_plane, distant);
+    }
+    X86_MEM32(ctx.esp + kFov) = std::bit_cast<uint32_t>(wide);
+    X86_MEM32(ctx.esp + kFar) = std::bit_cast<uint32_t>(distant);
+    HULK_IMP(HULK_SUB_SET_VIEW)(ctx, base);
+}
+
+// The render layer's frame setup (thiscall): gives the fog planes the scripts set (rm_SetFogPlanes: +0xE4, +0xE8) to
+// the frame. They move out with the far plane for the call and are put back after it, so the scripts' values stay.
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_APPLY_FOG));
+X86_FUNC(HULK_SUB_APPLY_FOG) {
+    constexpr uint32_t kFogNear = 0xE4, kFogFar = 0xE8;
+    const uint32_t layer = ctx.ecx;
+    constexpr uint32_t kFogOn = 0xD9;  // rm_EnableFog
+    const uint32_t fog_near = X86_MEM32(layer + kFogNear), fog_far = X86_MEM32(layer + kFogFar);
+    // the scripts' fog as it changes, and the setting's at each change of it
+    static uint32_t seen_near = ~0u, seen_far = ~0u, seen_generation = ~0u;
+    static uint8_t seen_on = 0xFF;
+    const uint8_t on = X86_MEM8(layer + kFogOn);
+    if (fog_near != seen_near || fog_far != seen_far || on != seen_on || hulk::ViewGeneration() != seen_generation) {
+        seen_near = fog_near, seen_far = fog_far, seen_on = on, seen_generation = hulk::ViewGeneration();
+        const float n = std::bit_cast<float>(fog_near), f = std::bit_cast<float>(fog_far);
+        LOGI("view: fog %s, planes %.0f-%.0f -> %.0f-%.0f", on ? "on" : "off", n, f, hulk::AdjustDistance(n),
+             hulk::AdjustDistance(f));
+    }
+    X86_MEM32(layer + kFogNear) = std::bit_cast<uint32_t>(hulk::AdjustDistance(std::bit_cast<float>(fog_near)));
+    X86_MEM32(layer + kFogFar) = std::bit_cast<uint32_t>(hulk::AdjustDistance(std::bit_cast<float>(fog_far)));
+    HULK_IMP(HULK_SUB_APPLY_FOG)(ctx, base);
+    X86_MEM32(layer + kFogNear) = fog_near;
+    X86_MEM32(layer + kFogFar) = fog_far;
 }

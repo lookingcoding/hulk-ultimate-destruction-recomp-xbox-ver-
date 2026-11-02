@@ -1,0 +1,20 @@
+# Start the tutorial and capture the same moments of play, for comparing runs with different view settings in
+# settings.toml (fov_increase, render_distance). Early frames of a scripted run match between runs; later ones drift.
+12000 300 START
+18000 300 START
+24000 300 START
+30000 300 START
+40000 300 START
+45000 300 A
+50000 300 A
+55000 300 A
+100000 100 CAPTURE
+110000 100 CAPTURE
+120000 100 CAPTURE
+125000 4000 LUP
+130000 100 CAPTURE
+131000 3000 LRIGHT
+136000 4000 LUP+RT
+142000 2500 RRIGHT
+146000 500 LRIGHT
+150000 100 CAPTURE

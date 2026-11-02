@@ -43,6 +43,10 @@ inline constexpr uint32_t kTextureStates = 0x0039DB10;        // D3D_DeferredTex
 #define HULK_SUB_FRAME_SWAP sub_0031B190       // thiscall: waits for the blanks, then D3DDevice_Swap
 #define HULK_SUB_GUARDED_CALL_A sub_002152F0   // the guarded call whose resume point is 0x215318
 #define HULK_SUB_GUARDED_CALL_B sub_002D6F10   // the guarded call whose resume point is 0x2D6F32
+inline constexpr uint32_t kRenderManager = 0x004E231C;        // the render manager, made on first use (0x1C3D90)
+#define HULK_SUB_RENDER_FRAME sub_001BC720     // the render manager's frame (tail jump to 0x1C3E10)
+#define HULK_SUB_SET_VIEW sub_001C1F30         // thiscall render layer (transform, fov, aspect, near, far)
+#define HULK_SUB_APPLY_FOG sub_001C2210        // thiscall render layer: the frame's fog and clear colour
 #else
 inline constexpr uint32_t kGuestNew = 0x0008D730;
 inline constexpr uint32_t kRegisterCallback = 0x000FC400;
@@ -79,6 +83,10 @@ inline constexpr uint32_t kTextureStates = 0x0039E5D0;
 #define HULK_SUB_FRAME_SWAP sub_0021F300
 #define HULK_SUB_GUARDED_CALL_A sub_0032DC20   // the guarded call whose resume point is 0x32DC48
 #define HULK_SUB_GUARDED_CALL_B sub_002B9850   // the guarded call whose resume point is 0x2B9872
+inline constexpr uint32_t kRenderManager = 0x004E445C;
+#define HULK_SUB_RENDER_FRAME sub_001BD100
+#define HULK_SUB_SET_VIEW sub_001C2940
+#define HULK_SUB_APPLY_FOG sub_001C2C20
 #endif
 }  // namespace hulk::addr
 

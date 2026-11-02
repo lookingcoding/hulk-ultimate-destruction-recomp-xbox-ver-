@@ -1,5 +1,6 @@
-﻿#include "common/display_menu.h"
+#include "common/display_menu.h"
 #include "common/addresses.h"
+#include "common/view.h"
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -36,11 +37,13 @@ constexpr const char* kSyncName = "PCDisplaySync";
 constexpr uint32_t kRcfAlign = 0x800;
 constexpr auto kSettleTime = std::chrono::milliseconds(400);
 
-enum Setting { kMode, kResolution, kFrameRate, kVSync, kScale, kSettings };
+// kFov and kRenderDistance are the game's view (view.h), applied at once; the others are the window's, applied once
+// they settle
+enum Setting { kMode, kResolution, kFrameRate, kVSync, kScale, kFov, kRenderDistance, kSettings };
 
 struct Entry {
     const char* key;  // string table key of its text
-    uint32_t a, b;    // the setting's value: mode, width and height, fps cap, vsync, percent
+    uint32_t a, b;    // the setting's value: mode, width and height, fps cap, vsync, percent, degrees, percent
 };
 
 struct Option {
@@ -58,32 +61,42 @@ struct Text {
 
 const Text kTexts[] = {
     {"TBS_PC_DISPLAY_OPTIONS", {"Display Options", "Options d'affichage", "Opciones de pantalla", "Opzioni schermo"}},
-    {"TBS_PC_DISPLAY_MODE", {"Display Mode", "Mode d'affichage", "Modo de pantalla", "ModalitÃ  schermo"}},
-    {"TBS_PC_FULLSCREEN", {"Fullscreen", "Plein Ã©cran", "Pantalla completa", "Schermo intero"}},
-    {"TBS_PC_BORDERLESS", {"Borderless", "FenÃªtre sans bordure", "Ventana sin bordes", "Finestra senza bordi"}},
-    {"TBS_PC_WINDOWED", {"Windowed", "FenÃªtrÃ©", "Ventana", "Finestra"}},
-    {"TBS_PC_RESOLUTION", {"Resolution", "RÃ©solution", "ResoluciÃ³n", "Risoluzione"}},
+    {"TBS_PC_DISPLAY_MODE", {"Display Mode", "Mode d'affichage", "Modo de pantalla", "Modalità schermo"}},
+    {"TBS_PC_FULLSCREEN", {"Fullscreen", "Plein écran", "Pantalla completa", "Schermo intero"}},
+    {"TBS_PC_BORDERLESS", {"Borderless", "Fenêtre sans bordure", "Ventana sin bordes", "Finestra senza bordi"}},
+    {"TBS_PC_WINDOWED", {"Windowed", "Fenêtré", "Ventana", "Finestra"}},
+    {"TBS_PC_RESOLUTION", {"Resolution", "Résolution", "Resolución", "Risoluzione"}},
     {"TBS_PC_RES_DESKTOP", {"Desktop", "Bureau", "Escritorio", "Desktop"}},
     {"TBS_PC_RES_1280X720", {"1280 x 720", "1280 x 720", "1280 x 720", "1280 x 720"}},
     {"TBS_PC_RES_1600X900", {"1600 x 900", "1600 x 900", "1600 x 900", "1600 x 900"}},
     {"TBS_PC_RES_1920X1080", {"1920 x 1080", "1920 x 1080", "1920 x 1080", "1920 x 1080"}},
     {"TBS_PC_RES_2560X1440", {"2560 x 1440", "2560 x 1440", "2560 x 1440", "2560 x 1440"}},
     {"TBS_PC_RES_3840X2160", {"3840 x 2160", "3840 x 2160", "3840 x 2160", "3840 x 2160"}},
-    {"TBS_PC_FRAME_RATE", {"Frame Rate Limit", "Limite d'images", "LÃ­mite de fotogramas", "Limite fotogrammi"}},
+    {"TBS_PC_FRAME_RATE", {"Frame Rate Limit", "Limite d'images", "Límite de fotogramas", "Limite fotogrammi"}},
     {"TBS_PC_FPS_30", {"30", "30", "30", "30"}},
     {"TBS_PC_FPS_60", {"60", "60", "60", "60"}},
     {"TBS_PC_FPS_120", {"120", "120", "120", "120"}},
     {"TBS_PC_FPS_144", {"144", "144", "144", "144"}},
-    {"TBS_PC_FPS_REFRESH", {"Refresh Rate", "FrÃ©quence de l'Ã©cran", "Frecuencia de pantalla", "Frequenza schermo"}},
-    {"TBS_PC_FPS_UNLIMITED", {"Unlimited", "IllimitÃ©e", "Ilimitado", "Illimitato"}},
-    {"TBS_PC_VSYNC", {"V-Sync", "Synchro verticale", "SincronizaciÃ³n vertical", "Sincronia verticale"}},
-    {"TBS_PC_RENDER_SCALE", {"Render Scale", "Ã‰chelle de rendu", "Escala de renderizado", "Scala di rendering"}},
+    {"TBS_PC_FPS_REFRESH", {"Refresh Rate", "Fréquence de l'écran", "Frecuencia de pantalla", "Frequenza schermo"}},
+    {"TBS_PC_FPS_UNLIMITED", {"Unlimited", "Illimitée", "Ilimitado", "Illimitato"}},
+    {"TBS_PC_VSYNC", {"V-Sync", "Synchro verticale", "Sincronización vertical", "Sincronia verticale"}},
+    {"TBS_PC_RENDER_SCALE", {"Render Scale", "Échelle de rendu", "Escala de renderizado", "Scala di rendering"}},
     {"TBS_PC_SCALE_50", {"50%", "50 %", "50%", "50%"}},
     {"TBS_PC_SCALE_75", {"75%", "75 %", "75%", "75%"}},
     {"TBS_PC_SCALE_100", {"100%", "100 %", "100%", "100%"}},
     {"TBS_PC_SCALE_150", {"150%", "150 %", "150%", "150%"}},
     {"TBS_PC_SCALE_200", {"200%", "200 %", "200%", "200%"}},
-    {"TBS_PC_CUSTOM", {"Custom", "PersonnalisÃ©", "Personalizado", "Personalizzato"}},
+    {"TBS_PC_FOV", {"Field of View", "Champ de vision", "Campo de visión", "Campo visivo"}},
+    {"TBS_PC_DEFAULT", {"Default", "Par défaut", "Predeterminado", "Predefinito"}},
+    {"TBS_PC_FOV_5", {"+5", "+5", "+5", "+5"}},
+    {"TBS_PC_FOV_10", {"+10", "+10", "+10", "+10"}},
+    {"TBS_PC_FOV_15", {"+15", "+15", "+15", "+15"}},
+    {"TBS_PC_FOV_20", {"+20", "+20", "+20", "+20"}},
+    {"TBS_PC_FOV_30", {"+30", "+30", "+30", "+30"}},
+    {"TBS_PC_RENDER_DISTANCE", {"Render Distance", "Distance d'affichage", "Distancia de dibujado", "Distanza visiva"}},
+    {"TBS_PC_SCALE_300", {"300%", "300 %", "300%", "300%"}},
+    {"TBS_PC_SCALE_400", {"400%", "400 %", "400%", "400%"}},
+    {"TBS_PC_CUSTOM", {"Custom", "Personnalisé", "Personalizado", "Personalizzato"}},
 };
 
 // the string tables and the column of kTexts each takes
@@ -99,6 +112,8 @@ bool Matches(Setting s, const Entry& e, const app::Settings& st) {
         case kFrameRate: return st.fps_cap == e.a;
         case kVSync: return uint32_t(st.vsync) == e.a;
         case kScale: return st.render_percent == e.a;
+        case kFov: return uint32_t(GetFovIncrease()) == e.a;
+        case kRenderDistance: return uint32_t(GetRenderDistance()) == e.a;
         default: return false;
     }
 }
@@ -110,6 +125,8 @@ void Assign(Setting s, const Entry& e, app::Settings& st) {
         case kFrameRate: st.fps_cap = e.a; break;
         case kVSync: st.vsync = e.a != 0; break;
         case kScale: st.render_percent = e.a; break;
+        case kFov: SetFovIncrease(int(e.a)); break;
+        case kRenderDistance: SetRenderDistance(int(e.a)); break;
         default: break;
     }
 }
@@ -143,6 +160,19 @@ std::vector<Option> MakeOptions(const app::Settings& st) {
           {"TBS_PC_SCALE_100", 100, 0},
           {"TBS_PC_SCALE_150", 150, 0},
           {"TBS_PC_SCALE_200", 200, 0}}},
+        {"PCFieldOfView", "pc_fov_selector", "TBS_PC_FOV",
+         {{"TBS_PC_DEFAULT", 0, 0},
+          {"TBS_PC_FOV_5", 5, 0},
+          {"TBS_PC_FOV_10", 10, 0},
+          {"TBS_PC_FOV_15", 15, 0},
+          {"TBS_PC_FOV_20", 20, 0},
+          {"TBS_PC_FOV_30", 30, 0}}},
+        {"PCRenderDistance", "pc_render_distance_selector", "TBS_PC_RENDER_DISTANCE",
+         {{"TBS_PC_DEFAULT", 100, 0},
+          {"TBS_PC_SCALE_150", 150, 0},
+          {"TBS_PC_SCALE_200", 200, 0},
+          {"TBS_PC_SCALE_300", 300, 0},
+          {"TBS_PC_SCALE_400", 400, 0}}},
     };
     for (int s = 0; s < kSettings; s++) {
         auto& entries = o[s].entries;
@@ -154,6 +184,8 @@ std::vector<Option> MakeOptions(const app::Settings& st) {
                 case kFrameRate: custom.a = st.fps_cap; break;
                 case kVSync: custom.a = st.vsync; break;
                 case kScale: custom.a = st.render_percent; break;
+                case kFov: custom.a = uint32_t(GetFovIncrease()); break;
+                case kRenderDistance: custom.a = uint32_t(GetRenderDistance()); break;
             }
             entries.push_back(custom);
         }
@@ -168,7 +200,8 @@ std::atomic<bool> g_served{false};  // the game reads the edited script
 std::atomic<bool> g_controller_prompts{false};  // the string tables as the game reads them: controller or keyboard
 std::atomic<int> g_prompt_device{0};  // PromptDevice: automatic unless settings.toml says otherwise
 std::atomic<int> g_language{0};  // the column of the string table the game read last: its language
-std::atomic<int64_t> g_changed_at{0};  // steady clock ticks of the last unapplied change, 0 for none
+std::atomic<int64_t> g_changed_at{0};  // steady clock ticks of the last unsaved change, 0 for none
+std::atomic<bool> g_display_changed{false};  // a window setting changed since the last apply
 
 // the selection a selector starts at: the current setting's (one digit, the script's bytes keep their length)
 char Selection(Setting s) {
@@ -317,10 +350,10 @@ const Prompt kKeyboardPrompts[] = {
     {"at", {"[Left Click]", "[Clic gauche]", "[Clic izquierdo]", "[Clic sinistro]"}},             // X
     {"sp", {"[E]", "[E]", "[E]", "[E]"}},                                                         // Y
     {"ta", {"[Right Click]", "[Clic droit]", "[Clic derecho]", "[Clic destro]"}},                 // left trigger
-    {"ru", {"[Shift]", "[Maj]", "[MayÃºs]", "[Maiusc]"}},                                          // right trigger
+    {"ru", {"[Shift]", "[Maj]", "[Mayús]", "[Maiusc]"}},                                          // right trigger
     {"la", {"[WASD]", "[WASD]", "[WASD]", "[WASD]"}},                                             // left stick
     {"lr", {"[A/D]", "[A/D]", "[A/D]", "[A/D]"}},                                                 // left stick around
-    {"ra", {"[Mouse]", "[Souris]", "[RatÃ³n]", "[Mouse]"}},                                        // right stick
+    {"ra", {"[Mouse]", "[Souris]", "[Ratón]", "[Mouse]"}},                                        // right stick
     {"se", {"[Space]", "[Espace]", "[Espacio]", "[Spazio]"}},                                       // A as select
     {"jc", {"[Hold Space]", "[Maintenir Espace]", "[Mantener Espacio]", "[Tenere Spazio]"}},      // A held
     {"uc", {"[Hold Q]", "[Maintenir Q]", "[Mantener Q]", "[Tenere Q]"}},                          // B held
@@ -333,7 +366,7 @@ const Prompt kKeyboardPrompts[] = {
 // delete, the menu's A, B and X; keyboard.cpp maps the keys to those buttons
 constexpr uint32_t kMenuIcons = 0x1884, kMenuIconSize = 0x80;
 const Prompt kMenuPrompts[] = {
-    {"se", {"[Enter]", "[EntrÃ©e]", "[Intro]", "[Invio]"}},
+    {"se", {"[Enter]", "[Entrée]", "[Intro]", "[Invio]"}},
     {"ba", {"[Q]", "[Q]", "[Q]", "[Q]"}},
     {"de", {"[Delete]", "[Suppr]", "[Supr]", "[Canc]"}},
 };
@@ -343,10 +376,10 @@ const Prompt kMenuPrompts[] = {
 // splash screen's "Press START" would name a button a keyboard has not got)
 const Text kKeyboardLines[] = {
     {"TBS_MENU_ITEM_PRESS_START", {"[Space] Start", "[Espace] Start", "[Espacio] Start", "[Spazio] Start"}},
-    {"TBS_MENU_ITEM_PRESS_START2", {"Press Enter", "Appuyez sur EntrÃ©e", "Pulse Intro", "Premi Invio"}},
-    {"TBS_MENU_ITEM_PRESS_START2_XBOX", {"Press Enter", "Appuyez sur EntrÃ©e", "Pulse Intro", "Premi Invio"}},
-    {"TBS_MENU_ITEM_PRESS_START2_GC", {"Press Enter", "Appuyez sur EntrÃ©e", "Pulse Intro", "Premi Invio"}},
-    {"TBS_MENU_ITEM_PRESS_START2_PS2", {"Press Enter", "Appuyez sur EntrÃ©e", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START2", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START2_XBOX", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START2_GC", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START2_PS2", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
     {"TBS_MENU_ITEM_PRESS_START3", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
     {"TBS_MENU_ITEM_PRESS_START3_XBOX", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
     {"TBS_MENU_ITEM_PRESS_START3_GC", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
@@ -710,6 +743,7 @@ bool DisplayCallback(uint32_t owner, uint32_t value) {
     if (Matches(s, e, st)) return true;
     Assign(s, e, st);
     LOGI("display menu: %s -> %s", g_options[s].named_value, e.key);
+    if (s != kFov && s != kRenderDistance) g_display_changed.store(true);
     g_changed_at.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
     return true;
 }
@@ -719,7 +753,7 @@ void TickDisplaySettings() {
     if (!at) return;
     auto since = std::chrono::steady_clock::now() - std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(at));
     if (since < kSettleTime || !g_changed_at.compare_exchange_strong(at, 0, std::memory_order_relaxed)) return;
-    app::ApplyDisplay();
+    if (g_display_changed.exchange(false)) app::ApplyDisplay();  // the view's settings apply as they change
     app::Save();
 }
 

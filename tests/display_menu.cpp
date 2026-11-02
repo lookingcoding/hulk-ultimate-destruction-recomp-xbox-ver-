@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -7,6 +8,7 @@
 #include <vector>
 #include "app/app.h"
 #include "common/display_menu.h"
+#include "common/view.h"
 #include "kernel/kernel.h"
 
 // Serve the real misc.rcf through the display menu's view and read it back as the game's cement library reader does.
@@ -102,6 +104,8 @@ int main(int argc, char** argv) {
     app::settings.fps_cap = 90;  // not a choice: Custom
     app::settings.vsync = true;
     app::settings.render_percent = 100;
+    hulk::SetFovIncrease(15);
+    hulk::SetRenderDistance(250);  // not a choice: Custom
 
     Check(!hulk::GameFileView("D:\\art.rcf", own.size(), read), "only misc.rcf gets a view");
     auto view = hulk::GameFileView("D:\\misc.rcf", own.size(), read);
@@ -166,19 +170,23 @@ int main(int argc, char** argv) {
         Check(script->find("TBS_PC_FPS_UNLIMITED TBS_PC_CUSTOM\r\n") != std::string::npos, "custom fps is a choice");
         Check(script->find("AddNamedValueInt \"PCVSync\" 0 \"PCVSyncChanged\"") != std::string::npos, "vsync on selected");
         Check(script->find("AddNamedValueInt \"PCRenderScale\" 2 \"PCRenderScaleChanged\"") != std::string::npos, "100% selected");
+        Check(script->find("AddNamedValueInt \"PCFieldOfView\" 3 \"PCFieldOfViewChanged\"") != std::string::npos, "+15 selected");
+        Check(script->find("AddNamedValueInt \"PCRenderDistance\" 5 \"PCRenderDistanceChanged\"") != std::string::npos &&
+                  script->find("TBS_PC_SCALE_400 TBS_PC_CUSTOM\r\n        NamedValue \"PCRenderDistance\"") != std::string::npos,
+              "a render distance outside the choices is Custom");
         Check(script->find("        OnHighlight function \"PCDisplaySync\"\r\n") != std::string::npos, "the selectors sync on highlight");
         Check(script->find("TBS_MENU_ITEM_NO TBS_MENU_ITEM_YES\r\n        NamedValue \"CameraInvertX\"") != std::string::npos &&
                   script->find("TBS_MENU_ITEM_NO TBS_MENU_ITEM_YES\r\n        NamedValue \"CameraInvertY\"") != std::string::npos,
               "Invert X and Y name the camera that looks up with the stick No");
     }
     Check(main_menu.find("AddTextButton \"FEmain_left_item5\"\r\n    {\r\n        text \"TBS_PC_DISPLAY_OPTIONS\"") != std::string::npos &&
-              main_menu.find("AddTextSelector \"FEsubMenu_text5\"") != std::string::npos,
+              main_menu.find("AddTextSelector \"FEsubMenu_text7\"") != std::string::npos,
           "the main menu's slots");
     Check(main_menu.find("ifplatform PS2 GAMECUBE\r\n{\r\n    AddTextSelector \"FEmain_left_item5\"") != std::string::npos,
           "the PS2 and GameCube widescreen row stays");
     Check(pause_menu.find("AddTextButton \"FEpause_text4\"\r\n    {\r\n        text \"TBS_PC_DISPLAY_OPTIONS\"") != std::string::npos &&
-              pause_menu.find("AddTextSelector \"FEpause_text5\"") != std::string::npos &&
-              pause_menu.find("        TransitionAnimEnter \"slide_down5\"") != std::string::npos,
+              pause_menu.find("AddTextSelector \"FEpause_text7\"") != std::string::npos &&
+              pause_menu.find("        TransitionAnimEnter \"slide_down7\"") != std::string::npos,
           "the pause menu's slots and select bars");
     if (argc > 2) std::ofstream(argv[2], std::ios::binary).write(main_menu.data(), std::streamsize(main_menu.size()));
     if (argc > 3) std::ofstream(argv[3], std::ios::binary).write(pause_menu.data(), std::streamsize(pause_menu.size()));
@@ -190,21 +198,24 @@ int main(int argc, char** argv) {
     ctx.esp = 0x80000;
     hulk::RegisterDisplayCallbacks(ctx);
     Check(ctx.esp == 0x80000, "the guest's stack is as it was");
-    Check(kernel::registered.size() == 6, "five selector callbacks and the sync");
-    if (kernel::registered.size() == 6) {
+    Check(kernel::registered.size() == 8, "seven selector callbacks and the sync");
+    if (kernel::registered.size() == 8) {
         Check(kernel::registered[1].first == "PCResolutionChanged", "named as the script names them");
         Check(kernel::registered[1].second == std::vector<uint32_t>({0x409B40, 0x101, 0xBBEC0}), "functor through the shared handler");
-        Check(kernel::registered[5].first == "PCDisplaySync", "the sync");
-        Check(kernel::registered[5].second == std::vector<uint32_t>({0x409B30, 0x105, 0xB46B0}), "sync through Print");
+        Check(kernel::registered[6].first == "PCRenderDistanceChanged", "the render distance's");
+        Check(kernel::registered[7].first == "PCDisplaySync", "the sync");
+        Check(kernel::registered[7].second == std::vector<uint32_t>({0x409B30, 0x107, 0xB46B0}), "sync through Print");
     }
     Check(!hulk::DisplaySync(ctx, 0x00123456), "a real Print owner goes to the game");
     ctx.ecx = 0xABCD;
-    Check(hulk::DisplaySync(ctx, 0x105), "the sync");
+    Check(hulk::DisplaySync(ctx, 0x107), "the sync");
     Check(ctx.esp == 0x80000 && ctx.ecx == 0xABCD, "the sync leaves the registers as they were");
     Check(kernel::widgets == std::vector<std::string>({"pc_display_mode_selector", "pc_resolution_selector",
-                                                        "pc_frame_rate_selector", "pc_vsync_selector", "pc_render_scale_selector"}),
+                                                        "pc_frame_rate_selector", "pc_vsync_selector", "pc_render_scale_selector",
+                                                        "pc_fov_selector", "pc_render_distance_selector"}),
           "each selector found by its name");
-    Check(kernel::selections == std::vector<std::pair<uint32_t, uint32_t>>({{0x40010, 1}, {0x40020, 3}, {0x40030, 6}, {0x40040, 0}, {0x40050, 2}}),
+    Check(kernel::selections == std::vector<std::pair<uint32_t, uint32_t>>({{0x40010, 1}, {0x40020, 3}, {0x40030, 6}, {0x40040, 0}, {0x40050, 2},
+                                                                                 {0x40060, 3}, {0x40070, 5}}),
           "each set to the current setting");
     Check(!hulk::DisplayCallback(0x00123456, 1), "a real AudioQuality owner goes to the game");
     Check(hulk::DisplayCallback(0x101, 5), "resolution selector");
@@ -213,6 +224,11 @@ int main(int argc, char** argv) {
     Check(hulk::DisplayCallback(0x101, 99) && app::settings.width == 3840, "a selection past the choices is ignored");
     hulk::TickDisplaySettings();
     Check(app::applied == 0, "changes wait to settle");
+    // the view's settings apply at once, without the window's
+    const uint32_t generation = hulk::ViewGeneration();
+    Check(hulk::DisplayCallback(0x105, 5) && hulk::GetFovIncrease() == 30 && hulk::ViewGeneration() != generation,
+          "+30 field of view applies at once");
+    Check(hulk::DisplayCallback(0x106, 2) && hulk::GetRenderDistance() == 200, "200% render distance applies at once");
     std::vector<uint8_t> after = served();
     std::string again(after.begin(), after.end());
     Check(again.find("AddNamedValueInt \"PCResolution\" 5 \"PCResolutionChanged\"") != std::string::npos &&
@@ -220,6 +236,22 @@ int main(int argc, char** argv) {
           "the script read again starts at the settings as they are");
     Check(again.size() == rcf.size(), "the archive keeps its size");
 
+
+    // the view's arithmetic: degrees added to the game's horizontal field, the planes scaled
+    hulk::SetFovIncrease(20);
+    Check(std::fabs(hulk::AdjustFov(1.5f) - (1.5f + 20.0f * 3.14159265f / 180.0f)) < 1e-5f, "20 degrees wider");
+    Check(std::fabs(hulk::AdjustFov(2.9f) - 170.0f * 3.14159265f / 180.0f) < 1e-4f, "never past 170 degrees");
+    Check(hulk::AdjustFov(3.0f) == 3.0f, "a field already past the limit stays the game's");
+    hulk::SetFovIncrease(1000);
+    Check(hulk::GetFovIncrease() == hulk::kMaxFovIncrease, "the increase is clamped");
+    hulk::SetFovIncrease(0);
+    Check(hulk::AdjustFov(1.3f) == 1.3f, "no increase leaves the game's field");
+    hulk::SetRenderDistance(300);
+    Check(hulk::AdjustDistance(650.0f) == 1950.0f, "300% triples a plane");
+    hulk::SetRenderDistance(5);
+    Check(hulk::GetRenderDistance() == hulk::kMinRenderDistance, "the distance is clamped");
+    hulk::SetRenderDistance(100);
+    Check(hulk::AdjustDistance(3000.0f) == 3000.0f, "100% leaves the game's planes");
 
     std::printf(failures ? "%d failed\n" : "display menu: all passed\n", failures);
     return failures ? 1 : 0;
