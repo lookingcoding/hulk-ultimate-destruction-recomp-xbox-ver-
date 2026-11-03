@@ -11,7 +11,8 @@ $project = Split-Path $PSScriptRoot -Parent
 $build = 'D:\Projects\Build Cache\Hulk Recompiled\release'
 $loader = 'Hulk Recompiled'
 $executables = 'HulkRecompiled', 'HulkRecompiledUSA'
-foreach ($exe in @($loader) + $executables) { if (!(Test-Path -LiteralPath "$build\$exe.exe")) { throw "Build the game first: $exe.exe is missing" } }
+$modtool = 'Hulk Mod Tool'
+foreach ($exe in @($loader, $modtool) + $executables) { if (!(Test-Path -LiteralPath "$build\$exe.exe")) { throw "Build the game first: $exe.exe is missing" } }
 $name = "HulkRecompiled-$Version-windows-x64"
 $stage = Join-Path $Output $name
 $zip = "$stage.zip"
@@ -25,6 +26,7 @@ function Copy-Verified([string]$Source, [string]$Relative) {
     if ((Get-FileHash -LiteralPath $target).Hash -ne (Get-FileHash -LiteralPath $Source).Hash) { throw "Copy verification failed: $Relative" }
 }
 Copy-Verified "$build\$loader.exe" "$loader.exe"
+Copy-Verified "$build\$modtool.exe" "$modtool.exe"  # copies the game's files out for modding (tools/modtool.cpp)
 foreach ($exe in $executables) { Copy-Verified "$build\$exe.exe" "game\$exe.exe" }
 foreach ($file in Get-ChildItem "$build\compiler" -File -Recurse) {
     $relative = $file.FullName.Substring("$build\compiler\".Length)

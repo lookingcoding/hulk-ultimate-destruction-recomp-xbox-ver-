@@ -4,6 +4,7 @@
 #include "common/camera.h"
 #include "common/display_menu.h"
 #include "common/keyboard.h"
+#include "common/language.h"
 #include "common/view.h"
 
 namespace hulk {
@@ -32,6 +33,13 @@ void LoadCustomSettings(const void* table_ptr) {
     if (auto v = t["fov_increase"].value<int64_t>()) SetFovIncrease(int(std::clamp<int64_t>(*v, 0, kMaxFovIncrease)));
     if (auto v = t["render_distance"].value<int64_t>())
         SetRenderDistance(int(std::clamp<int64_t>(*v, kMinRenderDistance, kMaxRenderDistance)));
+    // camera distance: percent of the chase camera's (view.h); language: the game's, from the next start (language.h)
+    if (auto v = t["camera_distance"].value<int64_t>())
+        SetCameraDistance(int(std::clamp<int64_t>(*v, kMinCameraDistance, kMaxCameraDistance)));
+    if (auto v = t["language"].value<std::string>()) {
+        Language language;
+        if (LanguageFromName(v->c_str(), language)) SetLanguage(language);
+    }
 }
 
 void SaveCustomSettings(void* table_ptr) {
@@ -45,6 +53,8 @@ void SaveCustomSettings(void* table_ptr) {
     t.insert_or_assign("button_prompts", std::string(PromptDeviceName(GetPromptDevice())));
     t.insert_or_assign("fov_increase", int64_t(GetFovIncrease()));
     t.insert_or_assign("render_distance", int64_t(GetRenderDistance()));
+    t.insert_or_assign("camera_distance", int64_t(GetCameraDistance()));
+    t.insert_or_assign("language", std::string(LanguageName(GetLanguage())));
 }
 
 }  // namespace hulk

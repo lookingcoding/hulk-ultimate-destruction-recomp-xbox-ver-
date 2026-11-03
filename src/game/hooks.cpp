@@ -10,6 +10,7 @@
 #include "common/addresses.h"
 #include "common/camera.h"
 #include "common/display_menu.h"
+#include "common/language.h"
 #include "common/view.h"
 #include "core/log.h"
 #include "cpu/x86_ops.h"
@@ -127,6 +128,30 @@ X86_FUNC(HULK_SUB_FRAME_SWAP) {
     HULK_IMP(HULK_SUB_FRAME_SWAP)(ctx, base);
 }
 
+// XGetLanguage (language.h): the language settings.toml names, where the runtime's console would always say English
+X86_FUNC(HULK_SUB_GET_LANGUAGE) {
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        LOGI("language: the game is told %s", hulk::LanguageName(hulk::GetLanguage()));
+    }
+    ctx.eax = uint32_t(hulk::GetLanguage());
+    ctx.esp += 4;
+}
+
+// the chase camera's update (view.h): its base distance (+0x440, what the scripts set) scaled by Camera Distance for
+// the update, which eases the camera's distance toward it, then put back unless the update set a new one
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_CHASE_CAM_UPDATE));
+X86_FUNC(HULK_SUB_CHASE_CAM_UPDATE) {
+    constexpr uint32_t kBaseDistance = 0x440;
+    const uint32_t camera = ctx.ecx;
+    const uint32_t own = X86_MEM32(camera + kBaseDistance);
+    const uint32_t scaled = std::bit_cast<uint32_t>(hulk::AdjustCameraDistance(std::bit_cast<float>(own)));
+    X86_MEM32(camera + kBaseDistance) = scaled;
+    HULK_IMP(HULK_SUB_CHASE_CAM_UPDATE)(ctx, base);
+    if (X86_MEM32(camera + kBaseDistance) == scaled) X86_MEM32(camera + kBaseDistance) = own;
+}
+
 // The bloom pass draws screen quads whose stages read their own texture coordinates, and never sets that: it trusts
 // what the scene left. A scene object can leave stage 1 reading set 0, and the game's cached setter then keeps it, so
 // the pass samples the 640x480 scene with the bloom texture's 160x120 coordinates: the top left quarter blown up under
@@ -209,3 +234,4 @@ X86_FUNC(HULK_SUB_APPLY_FOG) {
     X86_MEM32(layer + kFogNear) = fog_near;
     X86_MEM32(layer + kFogFar) = fog_far;
 }
+

@@ -42,5 +42,7 @@ bool DisplayCallback(uint32_t owner, uint32_t value);
 bool DisplaySync(X86Context& ctx, uint32_t owner);
 // applies settings the selectors changed once they settle, each polled pad
 void TickDisplaySettings();
+// a setting changed outside the menu (the mouse wheel's camera distance): saved once it settles
+void NoteSettingChanged();
 
 }  // namespace hulk

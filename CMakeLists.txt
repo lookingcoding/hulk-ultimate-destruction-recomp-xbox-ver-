@@ -30,6 +30,11 @@ add_executable(hulk_loader WIN32 tools/loader.cpp)
 set_target_properties(hulk_loader PROPERTIES OUTPUT_NAME "Hulk Recompiled")
 target_link_libraries(hulk_loader PRIVATE shell32)
 
+# Hulk Mod Tool.exe: copies the files out of the game's archives for modding (tools/modtool.cpp)
+add_executable(hulk_modtool tools/modtool.cpp src/common/rcf.cpp ${SDK}/runtime/kernel/disc.cpp)
+set_target_properties(hulk_modtool PROPERTIES OUTPUT_NAME "Hulk Mod Tool")
+target_include_directories(hulk_modtool PRIVATE src ${SDK}/runtime)
+
 enable_testing()
 add_executable(hulk_analysis_tests tests/analysis.cpp ${SDK}/tools/recomp/analysis.cpp)
 target_include_directories(hulk_analysis_tests PRIVATE ${SDK}/runtime ${SDK}/tools/recomp)
@@ -41,7 +46,8 @@ add_test(NAME keyboard_input_lifecycle COMMAND hulk_input_tests)
 add_executable(hulk_kernel_io_tests tests/kernel_io.cpp ${SDK}/runtime/kernel/io_completion.cpp)
 target_include_directories(hulk_kernel_io_tests PRIVATE ${SDK}/runtime)
 add_test(NAME kernel_io_completion COMMAND hulk_kernel_io_tests)
-add_executable(hulk_display_menu_tests tests/display_menu.cpp src/common/display_menu.cpp src/common/view.cpp)
+add_executable(hulk_display_menu_tests tests/display_menu.cpp src/common/display_menu.cpp src/common/view.cpp
+    src/common/rcf.cpp src/common/language.cpp)
 target_include_directories(hulk_display_menu_tests PRIVATE src ${SDK}/runtime)
 add_test(NAME display_menu_rcf COMMAND hulk_display_menu_tests ${CMAKE_CURRENT_SOURCE_DIR}/assets/misc.rcf)
 

@@ -1,5 +1,7 @@
 #include "common/display_menu.h"
 #include "common/addresses.h"
+#include "common/language.h"
+#include "common/rcf.h"
 #include "common/view.h"
 #include <algorithm>
 #include <atomic>
@@ -34,12 +36,14 @@ constexpr uint32_t kSetSelection = 0x64;  // TextSelector vtable offset, thiscal
 constexpr uint32_t kOwnerBase = 0x100;
 constexpr const char* kSyncName = "PCDisplaySync";
 
-constexpr uint32_t kRcfAlign = 0x800;
 constexpr auto kSettleTime = std::chrono::milliseconds(400);
 
-// kFov and kRenderDistance are the game's view (view.h), applied at once; the others are the window's, applied once
-// they settle
-enum Setting { kMode, kResolution, kFrameRate, kVSync, kScale, kFov, kRenderDistance, kSettings };
+// kFov and kRenderDistance are the game's view (view.h), applied at once; kLanguage the game's language
+// (language.h), from the next start; the others are the window's, applied once they settle. The camera distance has
+// no row: the mouse wheel sets it in play (view.h)
+enum Setting { kMode, kResolution, kFrameRate, kVSync, kScale, kFov, kRenderDistance, kLanguage, kSettings };
+// rows the window's settings don't hold
+bool InGame(int s) { return s == kFov || s == kRenderDistance || s == kLanguage; }
 
 struct Entry {
     const char* key;  // string table key of its text
@@ -97,6 +101,11 @@ const Text kTexts[] = {
     {"TBS_PC_SCALE_300", {"300%", "300 %", "300%", "300%"}},
     {"TBS_PC_SCALE_400", {"400%", "400 %", "400%", "400%"}},
     {"TBS_PC_CUSTOM", {"Custom", "Personnalisé", "Personalizado", "Personalizzato"}},
+    {"TBS_PC_LANGUAGE", {"Language (restart)", "Langue (redémarrage)", "Idioma (reiniciar)", "Lingua (riavvio)"}},
+    {"TBS_PC_LANG_EN", {"English", "English", "English", "English"}},
+    {"TBS_PC_LANG_FR", {"Français", "Français", "Français", "Français"}},
+    {"TBS_PC_LANG_ES", {"Español", "Español", "Español", "Español"}},
+    {"TBS_PC_LANG_IT", {"Italiano", "Italiano", "Italiano", "Italiano"}},
 };
 
 // the string tables and the column of kTexts each takes
@@ -114,6 +123,7 @@ bool Matches(Setting s, const Entry& e, const app::Settings& st) {
         case kScale: return st.render_percent == e.a;
         case kFov: return uint32_t(GetFovIncrease()) == e.a;
         case kRenderDistance: return uint32_t(GetRenderDistance()) == e.a;
+        case kLanguage: return uint32_t(GetLanguage()) == e.a;
         default: return false;
     }
 }
@@ -127,6 +137,7 @@ void Assign(Setting s, const Entry& e, app::Settings& st) {
         case kScale: st.render_percent = e.a; break;
         case kFov: SetFovIncrease(int(e.a)); break;
         case kRenderDistance: SetRenderDistance(int(e.a)); break;
+        case kLanguage: SetLanguage(Language(e.a)); break;
         default: break;
     }
 }
@@ -173,6 +184,11 @@ std::vector<Option> MakeOptions(const app::Settings& st) {
           {"TBS_PC_SCALE_200", 200, 0},
           {"TBS_PC_SCALE_300", 300, 0},
           {"TBS_PC_SCALE_400", 400, 0}}},
+        {"PCLanguage", "pc_language_selector", "TBS_PC_LANGUAGE",
+         {{"TBS_PC_LANG_EN", uint32_t(Language::English), 0},
+          {"TBS_PC_LANG_FR", uint32_t(Language::French), 0},
+          {"TBS_PC_LANG_ES", uint32_t(Language::Spanish), 0},
+          {"TBS_PC_LANG_IT", uint32_t(Language::Italian), 0}}},
     };
     for (int s = 0; s < kSettings; s++) {
         auto& entries = o[s].entries;
@@ -186,6 +202,7 @@ std::vector<Option> MakeOptions(const app::Settings& st) {
                 case kScale: custom.a = st.render_percent; break;
                 case kFov: custom.a = uint32_t(GetFovIncrease()); break;
                 case kRenderDistance: custom.a = uint32_t(GetRenderDistance()); break;
+                case kLanguage: custom.a = uint32_t(GetLanguage()); break;
             }
             entries.push_back(custom);
         }
@@ -508,12 +525,6 @@ std::optional<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>> EditStrings
     return std::make_pair(std::move(pad), std::move(keys));
 }
 
-uint32_t U32(const std::vector<uint8_t>& b, size_t at) {
-    uint32_t v = 0;
-    if (at + 4 <= b.size()) std::memcpy(&v, b.data() + at, 4);
-    return v;
-}
-
 bool EqualNoCase(const std::string& a, const char* b) {
     size_t n = std::strlen(b);
     if (a.size() != n) return false;
@@ -564,39 +575,12 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
         b.resize(read(at, b.data(), n));
         return b;
     };
-    // header: "ATG CORE CEMENT LIBRARY", then at 0x24 the directory's offset and size, the names' offset and size,
-    // and at 0x38 the file count; directory entries are name hash, offset, size, sorted by hash; the names follow
-    // the files' order in the archive
-    std::vector<uint8_t> head = bytes(0, 0x40);
-    if (head.size() < 0x40 || std::memcmp(head.data(), "ATG CORE CEMENT LIBRARY", 23) != 0) return nullptr;
-    uint32_t dir_at = U32(head, 0x24), names_at = U32(head, 0x2C), names_size = U32(head, 0x30), count = U32(head, 0x38);
-    if (!count || count > 0x10000 || dir_at + uint64_t(count) * 12 > size || names_at + uint64_t(names_size) > size)
-        return nullptr;
-    std::vector<uint8_t> dir = bytes(dir_at, count * 12), names = bytes(names_at, names_size);
-    if (dir.size() != count * 12 || names.size() != names_size) return nullptr;
-
-    std::vector<uint32_t> order(count);
-    for (uint32_t i = 0; i < count; i++) order[i] = i;
-    std::stable_sort(order.begin(), order.end(), [&](uint32_t x, uint32_t y) {
-        uint32_t ox = U32(dir, x * 12 + 4), oy = U32(dir, y * 12 + 4);
-        return ox != oy ? ox < oy : U32(dir, x * 12 + 8) < U32(dir, y * 12 + 8);
-    });
-    // a name: time, alignment, 0, length with its terminator, the name, 3 bytes of padding
-    std::vector<std::pair<std::string, uint32_t>> files;  // name, directory entry
-    size_t p = 8;
-    for (uint32_t i = 0; i < count; i++) {
-        uint32_t len = U32(names, p + 12);
-        p += 16;
-        if (!len || p + len > names.size()) return nullptr;
-        files.emplace_back(std::string(reinterpret_cast<const char*>(names.data() + p), len - 1), order[i]);
-        p += len + 3;
-    }
-    auto find = [&](const char* name) -> std::optional<uint32_t> {
-        for (auto& [n, e] : files)
-            if (EqualNoCase(n, name)) return e;
-        return std::nullopt;
-    };
-    auto contents = [&](uint32_t e) { return bytes(U32(dir, e * 12 + 4), U32(dir, e * 12 + 8)); };
+    std::optional<Rcf> rcf = ReadRcf(size, read);  // rcf.h
+    if (!rcf) return nullptr;
+    const uint32_t dir_at = rcf->dir_at;
+    std::vector<uint8_t>& dir = rcf->dir;
+    auto find = [&](const char* name) { return rcf->Find(name); };
+    auto contents = [&](uint32_t e) { return bytes(rcf->Offset(e), rcf->Size(e)); };
 
     auto view = std::make_shared<RcfView>();
     view->dir_at = dir_at;
@@ -743,9 +727,13 @@ bool DisplayCallback(uint32_t owner, uint32_t value) {
     if (Matches(s, e, st)) return true;
     Assign(s, e, st);
     LOGI("display menu: %s -> %s", g_options[s].named_value, e.key);
-    if (s != kFov && s != kRenderDistance) g_display_changed.store(true);
+    if (!InGame(s)) g_display_changed.store(true);
     g_changed_at.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
     return true;
+}
+
+void NoteSettingChanged() {
+    g_changed_at.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
 }
 
 void TickDisplaySettings() {

@@ -37,8 +37,15 @@ The game checks your disc image when it starts and tells you if it can't use it.
   - **V-Sync** and **Render Scale** (50% to 200%).
   - **Field of View:** Default, +5, +10, +15, +20, +30 degrees added to the game's horizontal field of view (91° in play on a widescreen output). It applies at once, including behind a paused game, and to every 3D view the game draws, cutscenes included. `settings.toml`: `fov_increase` (0 to 60).
   - **Render Distance:** Default, 150%, 200%, 300%, 400%. It moves the far plane and the level's fog out together; the fog is what limits how far you can see in this game, so a higher setting shows distant scenery more clearly. Pushing the fog back also shows what the fog was hiding, for example a bright sky glow behind the junkyard. `settings.toml`: `render_distance` (50 to 1000, percent).
+  - **Camera Distance (mouse wheel):** in play, the mouse wheel moves the camera closer (up) or farther (down) behind Hulk, in steps from 50% to 200% of the game's distance, and the choice is saved. The game's own easing and combat pull-back still apply on top. `settings.toml`: `camera_distance` (30 to 300, percent).
+  - **Language (restart):** English, Français, Español, Italiano. The game reads it once at start, so restart after changing it. French and Italian have their own voices; Spanish has Spanish text with English voices, as on the disc. `settings.toml`: `language = "english" | "french" | "spanish" | "italian"`.
 - `settings.toml` also takes `aspect = "auto" | "4:3" | "16:9"`: the game draws 4:3, so on a widescreen output `"4:3"` shows it pillarboxed instead of stretched (the automatic default reports a widescreen TV to the game, which this title does not use).
   - Changes apply once the selection settles and persist in `settings.toml`. The game's files are not modified: the runtime serves edited `frontend\fe_real.txt` (main menu), `frontend\fe_run.txt` (pause menu) and string tables through a view of `misc.rcf` (see `src/common/display_menu.cpp`).
+- **Mod Support:**
+  - Put each mod in its own folder inside `mods` (next to `assets`; the game creates it with a `README.txt` on first launch). A file in a mod's folder replaces the game's file with the same path, even inside the `.rcf` archives: `mods\My Modrontend\lang\str_en.txt` replaces the English text table inside `misc.rcf`, `mods\My Modrt\copyright-en.p3d` replaces that model inside `art.rcf`. A disc-level path such as `mods\My Mod\misc.rcf` replaces the whole archive.
+  - `Hulk Mod Tool.exe` copies every file out of your game (17,415 files, about 2.8 GB) into `Game Files`, with the paths mods use and a `file list.txt` saying which archive holds each one.
+  - Mods load in folder-name order, and when two mods replace the same file the later name wins. Put `_` at the start of a folder name to turn that mod off. Your game files are never changed; `logs\hulk.log` lists every mod file the game used.
+  - Limits: mods can replace files but not add new ones, and the game's `.lua` scripts are compiled Lua 5.1 bytecode with 32-bit float numbers. Whether the game also loads plain-text Lua is untested.
 - **Native D3D12 & 64-bit Recompilation:**
   - Runs natively on modern 64-bit Windows systems.
   - Vertex buffer synchronization, video playback (Bink), and fiber context switching.
@@ -55,6 +62,7 @@ Keyboard and mouse input is mapped to player 1 alongside any connected Xbox/Play
 | **Left Click** | Light Attack / Punch (gameplay) / Select (menus) | X Button / A Button |
 | **Right Click** | Guard / Lock-On (gameplay) / Back (menus) | Left Trigger (LT) / B Button |
 | **Mouse Wheel** | Menu Item Scroll | D-Pad Up / Down |
+| **Mouse Wheel** (in play) | Camera Closer / Farther | — |
 | **W / A / S / D** | Movement | Left Analog Stick |
 | **Space** | Jump / Charge Jump / Select | A Button |
 | **Enter** | Select (menus) | A Button |

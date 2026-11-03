@@ -730,4 +730,6 @@ void KeyboardPad(int port, input::Pad& pad) {
     ReplayPad(port, pad);
 }
 
+bool InGameplay() { return !IsInMenuState(); }
+
 }  // namespace hulk

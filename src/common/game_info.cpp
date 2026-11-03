@@ -4,8 +4,10 @@
 #include "common/diagnostics.h"
 #include "common/display_menu.h"
 #include "common/keyboard.h"
+#include "common/mods.h"
 #include "common/release.h"
 #include "common/settings_ui.h"
+#include "common/view.h"
 #include "core/input.h"
 #include "kernel/memory.h"
 
@@ -31,6 +33,7 @@ void ApplyPrompts(bool controller) {
 void OnInit() {
     hulk::InitDiagnostics();
     hulk::RunMatchingRelease();  // the other release's game in assets: its own executable runs it
+    hulk::LoadMods();            // mods\ beside assets (mods.h)
 }
 
 void OnImageLoaded() {
@@ -48,6 +51,21 @@ void OnPad(int port, input::Pad& pad) {
     hulk::KeepCameraInvert();
     if (port == 0) ApplyPrompts(pad.connected);  // a physical controller; keyboard input joins after
     hulk::KeyboardPad(port, pad);
+}
+
+bool OnMessage(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t* result) {
+    // the mouse wheel in play: the camera closer (up) or farther (down), a step of kCameraDistances a notch (view.h)
+    constexpr uint32_t kMouseWheel = 0x020A;
+    constexpr int kWheelDelta = 120;
+    if (message == kMouseWheel && hulk::InGameplay()) {
+        static int accumulated = 0;
+        accumulated += int16_t(uint16_t(wp >> 16));
+        int steps = 0;
+        for (; accumulated >= kWheelDelta; accumulated -= kWheelDelta) steps--;
+        for (; accumulated <= -kWheelDelta; accumulated += kWheelDelta) steps++;
+        if (steps && hulk::StepCameraDistance(steps)) hulk::NoteSettingChanged();
+    }
+    return hulk::KeyboardMessage(hwnd, message, wp, lp, result);
 }
 }  // namespace
 
@@ -68,9 +86,9 @@ const app::GameInfo app::kGame = {
     .init = OnInit,
     .loaded = OnImageLoaded,                         // image in memory, before its entry point runs
     .window = OnWindowReady,                         // the game window is up
-    .message = hulk::KeyboardMessage,
+    .message = OnMessage,
     .ui = nullptr,                                   // display settings are a screen of the game's own Options
     .pad = OnPad,
     .rumble = nullptr,                               // changes a rumble before it is set
-    .file = hulk::GameFileView,                      // misc.rcf with the Display Options screen in its frontend
+    .file = hulk::ModFileView,                       // mods, and misc.rcf with the Display Options screen
 };

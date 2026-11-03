@@ -47,6 +47,8 @@ inline constexpr uint32_t kRenderManager = 0x004E231C;        // the render mana
 #define HULK_SUB_RENDER_FRAME sub_001BC720     // the render manager's frame (tail jump to 0x1C3E10)
 #define HULK_SUB_SET_VIEW sub_001C1F30         // thiscall render layer (transform, fov, aspect, near, far)
 #define HULK_SUB_APPLY_FOG sub_001C2210        // thiscall render layer: the frame's fog and clear colour
+#define HULK_SUB_GET_LANGUAGE sub_00209F50     // XGetLanguage: the console's language (language.h)
+#define HULK_SUB_CHASE_CAM_UPDATE sub_000A75D0  // thiscall chase camera, its update (vtable +0x20; ret 0x10)
 #else
 inline constexpr uint32_t kGuestNew = 0x0008D730;
 inline constexpr uint32_t kRegisterCallback = 0x000FC400;
@@ -87,6 +89,8 @@ inline constexpr uint32_t kRenderManager = 0x004E445C;
 #define HULK_SUB_RENDER_FRAME sub_001BD100
 #define HULK_SUB_SET_VIEW sub_001C2940
 #define HULK_SUB_APPLY_FOG sub_001C2C20
+#define HULK_SUB_GET_LANGUAGE sub_0020AA00
+#define HULK_SUB_CHASE_CAM_UPDATE sub_000A76A0
 #endif
 }  // namespace hulk::addr
 

@@ -8,6 +8,7 @@
 #include <vector>
 #include "app/app.h"
 #include "common/display_menu.h"
+#include "common/language.h"
 #include "common/view.h"
 #include "kernel/kernel.h"
 
@@ -106,6 +107,7 @@ int main(int argc, char** argv) {
     app::settings.render_percent = 100;
     hulk::SetFovIncrease(15);
     hulk::SetRenderDistance(250);  // not a choice: Custom
+    hulk::SetLanguage(hulk::Language::Spanish);
 
     Check(!hulk::GameFileView("D:\\art.rcf", own.size(), read), "only misc.rcf gets a view");
     auto view = hulk::GameFileView("D:\\misc.rcf", own.size(), read);
@@ -180,13 +182,13 @@ int main(int argc, char** argv) {
               "Invert X and Y name the camera that looks up with the stick No");
     }
     Check(main_menu.find("AddTextButton \"FEmain_left_item5\"\r\n    {\r\n        text \"TBS_PC_DISPLAY_OPTIONS\"") != std::string::npos &&
-              main_menu.find("AddTextSelector \"FEsubMenu_text7\"") != std::string::npos,
+              main_menu.find("AddTextSelector \"FEsubMenu_text8\"") != std::string::npos,
           "the main menu's slots");
     Check(main_menu.find("ifplatform PS2 GAMECUBE\r\n{\r\n    AddTextSelector \"FEmain_left_item5\"") != std::string::npos,
           "the PS2 and GameCube widescreen row stays");
     Check(pause_menu.find("AddTextButton \"FEpause_text4\"\r\n    {\r\n        text \"TBS_PC_DISPLAY_OPTIONS\"") != std::string::npos &&
-              pause_menu.find("AddTextSelector \"FEpause_text7\"") != std::string::npos &&
-              pause_menu.find("        TransitionAnimEnter \"slide_down7\"") != std::string::npos,
+              pause_menu.find("AddTextSelector \"FEpause_text8\"") != std::string::npos &&
+              pause_menu.find("        TransitionAnimEnter \"slide_down8\"") != std::string::npos,
           "the pause menu's slots and select bars");
     if (argc > 2) std::ofstream(argv[2], std::ios::binary).write(main_menu.data(), std::streamsize(main_menu.size()));
     if (argc > 3) std::ofstream(argv[3], std::ios::binary).write(pause_menu.data(), std::streamsize(pause_menu.size()));
@@ -198,24 +200,26 @@ int main(int argc, char** argv) {
     ctx.esp = 0x80000;
     hulk::RegisterDisplayCallbacks(ctx);
     Check(ctx.esp == 0x80000, "the guest's stack is as it was");
-    Check(kernel::registered.size() == 8, "seven selector callbacks and the sync");
-    if (kernel::registered.size() == 8) {
+    Check(kernel::registered.size() == 9, "eight selector callbacks and the sync");
+    if (kernel::registered.size() == 9) {
         Check(kernel::registered[1].first == "PCResolutionChanged", "named as the script names them");
         Check(kernel::registered[1].second == std::vector<uint32_t>({0x409B40, 0x101, 0xBBEC0}), "functor through the shared handler");
         Check(kernel::registered[6].first == "PCRenderDistanceChanged", "the render distance's");
-        Check(kernel::registered[7].first == "PCDisplaySync", "the sync");
-        Check(kernel::registered[7].second == std::vector<uint32_t>({0x409B30, 0x107, 0xB46B0}), "sync through Print");
+        Check(kernel::registered[7].first == "PCLanguageChanged", "the language's");
+        Check(kernel::registered[8].first == "PCDisplaySync", "the sync");
+        Check(kernel::registered[8].second == std::vector<uint32_t>({0x409B30, 0x108, 0xB46B0}), "sync through Print");
     }
     Check(!hulk::DisplaySync(ctx, 0x00123456), "a real Print owner goes to the game");
     ctx.ecx = 0xABCD;
-    Check(hulk::DisplaySync(ctx, 0x107), "the sync");
+    Check(hulk::DisplaySync(ctx, 0x108), "the sync");
     Check(ctx.esp == 0x80000 && ctx.ecx == 0xABCD, "the sync leaves the registers as they were");
     Check(kernel::widgets == std::vector<std::string>({"pc_display_mode_selector", "pc_resolution_selector",
                                                         "pc_frame_rate_selector", "pc_vsync_selector", "pc_render_scale_selector",
-                                                        "pc_fov_selector", "pc_render_distance_selector"}),
+                                                        "pc_fov_selector", "pc_render_distance_selector",
+                                                        "pc_language_selector"}),
           "each selector found by its name");
     Check(kernel::selections == std::vector<std::pair<uint32_t, uint32_t>>({{0x40010, 1}, {0x40020, 3}, {0x40030, 6}, {0x40040, 0}, {0x40050, 2},
-                                                                                 {0x40060, 3}, {0x40070, 5}}),
+                                                                                 {0x40060, 3}, {0x40070, 5}, {0x40080, 2}}),
           "each set to the current setting");
     Check(!hulk::DisplayCallback(0x00123456, 1), "a real AudioQuality owner goes to the game");
     Check(hulk::DisplayCallback(0x101, 5), "resolution selector");
@@ -229,6 +233,8 @@ int main(int argc, char** argv) {
     Check(hulk::DisplayCallback(0x105, 5) && hulk::GetFovIncrease() == 30 && hulk::ViewGeneration() != generation,
           "+30 field of view applies at once");
     Check(hulk::DisplayCallback(0x106, 2) && hulk::GetRenderDistance() == 200, "200% render distance applies at once");
+    Check(hulk::DisplayCallback(0x107, 3) && hulk::GetLanguage() == hulk::Language::Italian, "Italian chosen");
+    Check(app::applied == 0, "neither applies the window");
     std::vector<uint8_t> after = served();
     std::string again(after.begin(), after.end());
     Check(again.find("AddNamedValueInt \"PCResolution\" 5 \"PCResolutionChanged\"") != std::string::npos &&
@@ -252,6 +258,26 @@ int main(int argc, char** argv) {
     Check(hulk::GetRenderDistance() == hulk::kMinRenderDistance, "the distance is clamped");
     hulk::SetRenderDistance(100);
     Check(hulk::AdjustDistance(3000.0f) == 3000.0f, "100% leaves the game's planes");
+
+    // the camera distance: the wheel steps through the choices, a custom distance steps to the nearest
+    hulk::SetCameraDistance(100);
+    Check(hulk::AdjustCameraDistance(12.0f) == 12.0f, "100% leaves the game's distance");
+    Check(hulk::StepCameraDistance(-1) && hulk::GetCameraDistance() == 90, "a notch closer");
+    Check(hulk::StepCameraDistance(3) && hulk::GetCameraDistance() == 150, "three notches farther");
+    Check(hulk::AdjustCameraDistance(12.0f) == 18.0f, "150% of the game's");
+    hulk::SetCameraDistance(200);
+    Check(!hulk::StepCameraDistance(1) && hulk::GetCameraDistance() == 200, "no farther than the last choice");
+    hulk::SetCameraDistance(85);
+    Check(hulk::StepCameraDistance(-1) && hulk::GetCameraDistance() == 80, "a custom distance steps to the next closer");
+    hulk::SetCameraDistance(85);
+    Check(hulk::StepCameraDistance(1) && hulk::GetCameraDistance() == 90, "or the next farther");
+    hulk::SetCameraDistance(40);
+    Check(!hulk::StepCameraDistance(-1) && hulk::GetCameraDistance() == 40, "closer than the choices stays");
+    hulk::SetCameraDistance(1000);
+    Check(hulk::GetCameraDistance() == hulk::kMaxCameraDistance, "the camera distance is clamped");
+    hulk::Language l;
+    Check(hulk::LanguageFromName("French", l) && l == hulk::Language::French && !hulk::LanguageFromName("german", l),
+          "language names");
 
     std::printf(failures ? "%d failed\n" : "display menu: all passed\n", failures);
     return failures ? 1 : 0;
