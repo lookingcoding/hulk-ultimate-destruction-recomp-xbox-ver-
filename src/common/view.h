@@ -24,15 +24,19 @@ uint32_t ViewGeneration();
 float AdjustFov(float radians);
 // a far or fog plane distance moved out by the setting
 float AdjustDistance(float distance);
-// Camera distance (settings.toml's camera_distance, set by the mouse wheel in play): percent of
-// the chase camera's distance behind Hulk. The chase camera eases its distance (+0x444) toward a base distance (+0x440,
+// Camera distance (settings.toml's camera_distance, set by the mouse wheel in play): percent of the chase camera's
+// distance behind Hulk. The chase camera eases its distance (+0x444) toward a base distance (+0x440,
 // cm_SetChaseCamBaseDist) as it updates; hooks.cpp scales that base around each update, so the game's own easing and
-// combat pull-back carry on at the new distance.
-inline constexpr int kCameraDistances[] = {50, 60, 70, 80, 90, 100, 125, 150, 200};  // the wheel's steps
-inline constexpr int kMinCameraDistance = 30, kMaxCameraDistance = 300;              // percent, settings.toml
-void SetCameraDistance(int percent);  // clamped to kMinCameraDistance..kMaxCameraDistance
+// combat pull-back carry on at the new distance. A wheel notch changes the distance by kCameraZoomStep; the scale the
+// camera gets glides to it (TickCameraDistance) rather than jumping, so a spin of the wheel is one smooth zoom.
+inline constexpr int kMinCameraDistance = 40, kMaxCameraDistance = 250;  // percent
+inline constexpr float kCameraZoomStep = 1.12f;                          // a notch: 12% farther, or closer by as much
+inline constexpr float kCameraZoomRate = 8.0f;                           // the glide's speed, per second
+void SetCameraDistance(int percent);  // clamped to kMinCameraDistance..kMaxCameraDistance; the camera glides to it
 int GetCameraDistance();
-// the next choice closer (steps < 0) or farther; false when already at the end
+// notches closer (steps < 0) or farther; false when already at that end
 bool StepCameraDistance(int steps);
-float AdjustCameraDistance(float distance);
+// each chase camera update: the applied scale glides toward the setting over seconds; the first call starts there
+void TickCameraDistance(float seconds);
+float AdjustCameraDistance(float distance);  // by the applied scale
 }  // namespace hulk

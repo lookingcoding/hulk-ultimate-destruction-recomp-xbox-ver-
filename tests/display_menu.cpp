@@ -259,20 +259,22 @@ int main(int argc, char** argv) {
     hulk::SetRenderDistance(100);
     Check(hulk::AdjustDistance(3000.0f) == 3000.0f, "100% leaves the game's planes");
 
-    // the camera distance: the wheel steps through the choices, a custom distance steps to the nearest
+    // the camera distance: a wheel notch is 12%, the camera glides to it
     hulk::SetCameraDistance(100);
+    hulk::TickCameraDistance(0.0f);
     Check(hulk::AdjustCameraDistance(12.0f) == 12.0f, "100% leaves the game's distance");
-    Check(hulk::StepCameraDistance(-1) && hulk::GetCameraDistance() == 90, "a notch closer");
-    Check(hulk::StepCameraDistance(3) && hulk::GetCameraDistance() == 150, "three notches farther");
-    Check(hulk::AdjustCameraDistance(12.0f) == 18.0f, "150% of the game's");
-    hulk::SetCameraDistance(200);
-    Check(!hulk::StepCameraDistance(1) && hulk::GetCameraDistance() == 200, "no farther than the last choice");
-    hulk::SetCameraDistance(85);
-    Check(hulk::StepCameraDistance(-1) && hulk::GetCameraDistance() == 80, "a custom distance steps to the next closer");
-    hulk::SetCameraDistance(85);
-    Check(hulk::StepCameraDistance(1) && hulk::GetCameraDistance() == 90, "or the next farther");
-    hulk::SetCameraDistance(40);
-    Check(!hulk::StepCameraDistance(-1) && hulk::GetCameraDistance() == 40, "closer than the choices stays");
+    Check(hulk::StepCameraDistance(-1) && hulk::GetCameraDistance() == 89, "a notch closer");
+    Check(hulk::StepCameraDistance(2) && hulk::GetCameraDistance() == 112, "two notches farther");
+    Check(hulk::AdjustCameraDistance(12.0f) == 12.0f, "the camera has not moved yet");
+    hulk::TickCameraDistance(1.0f / 60.0f);
+    const float glide = hulk::AdjustCameraDistance(100.0f);
+    Check(glide > 100.0f && glide < 112.0f, "one frame later it is on its way");
+    for (int i = 0; i < 120; i++) hulk::TickCameraDistance(1.0f / 60.0f);
+    Check(std::fabs(hulk::AdjustCameraDistance(100.0f) - 112.0f) < 0.01f, "two seconds later it is there");
+    hulk::SetCameraDistance(hulk::kMaxCameraDistance);
+    Check(!hulk::StepCameraDistance(1), "no farther than the farthest");
+    hulk::SetCameraDistance(hulk::kMinCameraDistance);
+    Check(!hulk::StepCameraDistance(-1), "no closer than the closest");
     hulk::SetCameraDistance(1000);
     Check(hulk::GetCameraDistance() == hulk::kMaxCameraDistance, "the camera distance is clamped");
     hulk::Language l;

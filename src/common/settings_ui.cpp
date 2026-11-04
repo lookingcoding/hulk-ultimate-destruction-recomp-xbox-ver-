@@ -1,5 +1,13 @@
 #include "common/settings_ui.h"
 #include <algorithm>
+#include <string>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #include <toml++/toml.hpp>
 #include "common/camera.h"
 #include "common/display_menu.h"
@@ -8,6 +16,11 @@
 #include "common/view.h"
 
 namespace hulk {
+namespace {
+// settings.toml's renderer: "auto" starts Direct3D 12 and falls back to 11, "d3d11" starts 11 (the runtime reads
+// XBE_RENDERER when it makes the renderer, after the settings load)
+std::string g_renderer = "auto";
+}  // namespace
 
 void LoadCustomSettings(const void* table_ptr) {
     if (!table_ptr) return;
@@ -36,6 +49,10 @@ void LoadCustomSettings(const void* table_ptr) {
     // camera distance: percent of the chase camera's (view.h); language: the game's, from the next start (language.h)
     if (auto v = t["camera_distance"].value<int64_t>())
         SetCameraDistance(int(std::clamp<int64_t>(*v, kMinCameraDistance, kMaxCameraDistance)));
+    if (auto v = t["renderer"].value<std::string>()) {
+        g_renderer = *v == "d3d11" ? "d3d11" : "auto";
+        if (g_renderer == "d3d11") SetEnvironmentVariableW(L"XBE_RENDERER", L"d3d11");
+    }
     if (auto v = t["language"].value<std::string>()) {
         Language language;
         if (LanguageFromName(v->c_str(), language)) SetLanguage(language);
@@ -55,6 +72,7 @@ void SaveCustomSettings(void* table_ptr) {
     t.insert_or_assign("render_distance", int64_t(GetRenderDistance()));
     t.insert_or_assign("camera_distance", int64_t(GetCameraDistance()));
     t.insert_or_assign("language", std::string(LanguageName(GetLanguage())));
+    t.insert_or_assign("renderer", g_renderer);
 }
 
 }  // namespace hulk

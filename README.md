@@ -37,7 +37,7 @@ The game checks your disc image when it starts and tells you if it can't use it.
   - **V-Sync** and **Render Scale** (50% to 200%).
   - **Field of View:** Default, +5, +10, +15, +20, +30 degrees added to the game's horizontal field of view (91° in play on a widescreen output). It applies at once, including behind a paused game, and to every 3D view the game draws, cutscenes included. `settings.toml`: `fov_increase` (0 to 60).
   - **Render Distance:** Default, 150%, 200%, 300%, 400%. It moves the far plane and the level's fog out together; the fog is what limits how far you can see in this game, so a higher setting shows distant scenery more clearly. Pushing the fog back also shows what the fog was hiding, for example a bright sky glow behind the junkyard. `settings.toml`: `render_distance` (50 to 1000, percent).
-  - **Camera Distance (mouse wheel):** in play, the mouse wheel moves the camera closer (up) or farther (down) behind Hulk, in steps from 50% to 200% of the game's distance, and the choice is saved. The game's own easing and combat pull-back still apply on top. `settings.toml`: `camera_distance` (30 to 300, percent).
+  - **Camera Distance (mouse wheel):** in play, the mouse wheel zooms the camera closer (up) or farther (down) behind Hulk, about 12% a notch from 40% to 250% of the game's distance. The camera glides to the new distance rather than jumping, and the choice is saved. The game's own easing and combat pull-back still apply on top. `settings.toml`: `camera_distance` (40 to 250, percent).
   - **Language (restart):** English, Français, Español, Italiano. The game reads it once at start, so restart after changing it. French and Italian have their own voices; Spanish has Spanish text with English voices, as on the disc. `settings.toml`: `language = "english" | "french" | "spanish" | "italian"`.
 - `settings.toml` also takes `aspect = "auto" | "4:3" | "16:9"`: the game draws 4:3, so on a widescreen output `"4:3"` shows it pillarboxed instead of stretched (the automatic default reports a widescreen TV to the game, which this title does not use).
   - Changes apply once the selection settles and persist in `settings.toml`. The game's files are not modified: the runtime serves edited `frontend\fe_real.txt` (main menu), `frontend\fe_run.txt` (pause menu) and string tables through a view of `misc.rcf` (see `src/common/display_menu.cpp`).
@@ -46,8 +46,9 @@ The game checks your disc image when it starts and tells you if it can't use it.
   - `Hulk Mod Tool.exe` copies every file out of your game (17,415 files, about 2.8 GB) into `Game Files`, with the paths mods use and a `file list.txt` saying which archive holds each one.
   - Mods load in folder-name order, and when two mods replace the same file the later name wins. Put `_` at the start of a folder name to turn that mod off. Your game files are never changed; `logs\hulk.log` lists every mod file the game used.
   - Limits: mods can replace files but not add new ones, and the game's `.lua` scripts are compiled Lua 5.1 bytecode with 32-bit float numbers. Whether the game also loads plain-text Lua is untested.
-- **Native D3D12 & 64-bit Recompilation:**
+- **Native 64-bit Recompilation, Direct3D 12 or 11:**
   - Runs natively on modern 64-bit Windows systems.
+  - Draws with Direct3D 12, and falls back to a Direct3D 11 renderer by itself on graphics cards and drivers without Direct3D 12 (for example GeForce GTX 400/500, Radeon HD 5000/6000, older Intel graphics). `settings.toml`: `renderer = "d3d11"` uses Direct3D 11 always; `"auto"` (the default) tries Direct3D 12 first. `logs\hulk.log` says which one runs.
   - Vertex buffer synchronization, video playback (Bink), and fiber context switching.
 
 ---

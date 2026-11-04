@@ -54,7 +54,7 @@ void OnPad(int port, input::Pad& pad) {
 }
 
 bool OnMessage(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t* result) {
-    // the mouse wheel in play: the camera closer (up) or farther (down), a step of kCameraDistances a notch (view.h)
+    // the mouse wheel in play: the camera closer (up) or farther (down), gliding a kCameraZoomStep a notch (view.h)
     constexpr uint32_t kMouseWheel = 0x020A;
     constexpr int kWheelDelta = 120;
     if (message == kMouseWheel && hulk::InGameplay()) {

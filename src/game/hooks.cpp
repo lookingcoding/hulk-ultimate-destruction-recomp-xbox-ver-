@@ -7,6 +7,7 @@
 //     __imp__sub_00012345(ctx, base);  // the original
 // }
 #include <bit>
+#include <chrono>
 #include "common/addresses.h"
 #include "common/camera.h"
 #include "common/display_menu.h"
@@ -145,6 +146,11 @@ X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_CHASE_CAM_UPDATE));
 X86_FUNC(HULK_SUB_CHASE_CAM_UPDATE) {
     constexpr uint32_t kBaseDistance = 0x440;
     const uint32_t camera = ctx.ecx;
+    // the wheel's zoom glides with real time, whatever the frame rate
+    static auto last = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    hulk::TickCameraDistance(std::chrono::duration<float>(now - last).count());
+    last = now;
     const uint32_t own = X86_MEM32(camera + kBaseDistance);
     const uint32_t scaled = std::bit_cast<uint32_t>(hulk::AdjustCameraDistance(std::bit_cast<float>(own)));
     X86_MEM32(camera + kBaseDistance) = scaled;

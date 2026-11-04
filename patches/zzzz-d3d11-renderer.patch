@@ -1,0 +1,3074 @@
+diff --git a/cmake/XbeRecomp.cmake b/cmake/XbeRecomp.cmake
+index 22e033f..4da26d5 100644
+--- a/cmake/XbeRecomp.cmake
++++ b/cmake/XbeRecomp.cmake
+@@ -70,7 +70,8 @@ set(XBE_IMGUI_SOURCES
+     ${imgui_SOURCE_DIR}/imgui_tables.cpp
+     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+     ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+-    ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp)
++    ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp
++    ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp)
+ 
+ file(GLOB XBE_RUNTIME_SOURCES CONFIGURE_DEPENDS ${XBE_SDK_DIR}/runtime/*/*.cpp)
+ # SDL's headers go to the input code alone (it is linked LINK_ONLY)
+@@ -117,9 +118,10 @@ function(add_xbe_image target xbe config partitions game_dir)
+     target_include_directories(${target} SYSTEM PRIVATE ${imgui_SOURCE_DIR})
+     target_compile_options(${target} PRIVATE -fno-strict-aliasing)
+     target_compile_definitions(${target} PRIVATE UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
+-    target_link_libraries(${target} PRIVATE tomlplusplus::tomlplusplus $<LINK_ONLY:SDL3::SDL3-static> d3d12 dxgi dxguid d3dcompiler xaudio2 ole32 windowscodecs dbghelp winmm dwmapi ws2_32)
++    target_link_libraries(${target} PRIVATE tomlplusplus::tomlplusplus $<LINK_ONLY:SDL3::SDL3-static> d3d12 d3d11 dxgi dxguid d3dcompiler xaudio2 ole32 windowscodecs dbghelp winmm dwmapi ws2_32)
+     target_link_libraries(${target} PRIVATE ${GEN}/code.lib delayimp)
+-    target_link_options(${target} PRIVATE -fuse-ld=lld -g -Wl,/delayload:${target}.dll)
++    target_link_options(${target} PRIVATE -fuse-ld=lld -g -Wl,/delayload:${target}.dll
++        -Wl,/delayload:d3d12.dll)  # a PC without Direct3D 12 starts with the Direct3D 11 renderer (gpu/d3d11.cpp)
+ 
+     # without a C runtime: the executable passes on what the code calls
+     add_library(${target}_code SHARED ${GEN_SOURCES})
+diff --git a/runtime/gpu/backend.h b/runtime/gpu/backend.h
+index c82ae36..1d467f5 100644
+--- a/runtime/gpu/backend.h
++++ b/runtime/gpu/backend.h
+@@ -56,6 +56,8 @@ private:
+ };
+ 
+ std::unique_ptr<Backend> CreateBackend();
++// the Direct3D 11 renderer, for graphics cards and drivers without Direct3D 12 (gpu/d3d11.cpp)
++std::unique_ptr<Backend> CreateD3D11Backend();
+ // the same backend driven from a thread of its own: calls return once recorded
+ std::unique_ptr<Backend> CreateThreadedBackend(std::unique_ptr<Backend> inner);
+ 
+diff --git a/runtime/xdk/d3d8.cpp b/runtime/xdk/d3d8.cpp
+index 5178584..d9e7f6c 100644
+--- a/runtime/xdk/d3d8.cpp
++++ b/runtime/xdk/d3d8.cpp
+@@ -10,6 +10,7 @@
+ 
+ #include <algorithm>
+ #include <atomic>
++#include <iterator>
+ #include <chrono>
+ #include <map>
+ #include <thread>
+@@ -271,15 +272,30 @@ void SetFrameBuffers(const char* caller, uint32_t pp) {
+         g_depth = zf ? NewSurface(w, h, zf, zf == 0x30 || zf == 0x31 ? 2 : 4) : 0;  // 0x30 LIN_D16, 0x31 LIN_F16
+     }
+     if (!g_backend) {
+-        g_backend = gpu::CreateBackend();
+-        if (!g_backend->Init(w, h)) {
+-            LOGE("d3d: renderer init failed");
+-            // no owner window: this runs on the title's thread and the window may already be fullscreen over the box
+-            MessageBoxW(nullptr,
+-                        L"Direct3D 12 could not be started. Make sure your graphics card supports it and its driver "
+-                        L"is up to date.",
+-                        app::kGame.short_title, MB_ICONERROR | MB_TOPMOST);
+-            kernel::Shutdown(1);
++        // Direct3D 12, else Direct3D 11 for graphics cards and drivers without it; XBE_RENDERER=d3d11 asks for 11
++        wchar_t asked[16] = {};
++        GetEnvironmentVariableW(L"XBE_RENDERER", asked, DWORD(std::size(asked)));
++        bool want11 = _wcsicmp(asked, L"d3d11") == 0;
++        // d3d12.dll is delay loaded: without it on the system the 12 renderer is never called into
++        if (!want11 && LoadLibraryW(L"d3d12.dll")) {
++            g_backend = gpu::CreateBackend();
++            if (!g_backend->Init(w, h)) {
++                LOGW("d3d: Direct3D 12 could not be started, trying Direct3D 11");
++                g_backend.reset();
++            }
++        }
++        if (!g_backend) {
++            g_backend = gpu::CreateD3D11Backend();
++            if (!g_backend->Init(w, h)) {
++                LOGE("d3d: renderer init failed");
++                // no owner window: this runs on the title's thread and the window may already be fullscreen over the box
++                MessageBoxW(nullptr,
++                            L"Neither Direct3D 12 nor Direct3D 11 could be started. Make sure your graphics card "
++                            L"supports Direct3D 11 and its driver is up to date.",
++                            app::kGame.short_title, MB_ICONERROR | MB_TOPMOST);
++                kernel::Shutdown(1);
++            }
++            LOGR("Renderer: Direct3D 11");
+         }
+         if (kRenderThread) g_backend = gpu::CreateThreadedBackend(std::move(g_backend));
+     }
+diff --git a/runtime/gpu/d3d11.cpp b/runtime/gpu/d3d11.cpp
+new file mode 100644
+index 0000000..59d1e72
+--- /dev/null
++++ b/runtime/gpu/d3d11.cpp
+@@ -0,0 +1,2976 @@
++// The title's Direct3D 8 calls drawn with Direct3D 11: the renderer for graphics cards and drivers without Direct3D 12
++// (d3d8.cpp falls back to it, XBE_RENDERER=d3d11 asks for it). It follows d3d12.cpp step for step with the same
++// shaders; what Direct3D 11 does for it (resource states, descriptor heaps, upload rings, fences) drops out, and what
++// it lacks (rect clears, pipeline objects) is done by draws and state objects. Renderer extensions are D3D12 only.
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#include <d3d11.h>
++#include <d3dcompiler.h>
++#include <dxgi1_6.h>
++#include <wrl/client.h>
++
++#include <algorithm>
++#include <array>
++#include <atomic>
++#include <cfloat>
++#include <chrono>
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++#include <deque>
++#include <filesystem>
++#include <mutex>
++#include <optional>
++#include <unordered_map>
++#include <unordered_set>
++
++#include <imgui.h>
++#include <backends/imgui_impl_dx11.h>
++#include <backends/imgui_impl_win32.h>
++
++#include "app/app.h"
++#include "core/diag.h"
++#include "core/log.h"
++#include "gpu/backend.h"
++#include "gpu/shaders.h"
++#include "gpu/texture.h"
++#include "gpu/texturedumper.h"
++#include "gpu/vertex.h"
++#include "kernel/kernel.h"
++
++using Microsoft::WRL::ComPtr;
++
++namespace gpu {
++
++namespace {
++
++constexpr uint64_t kStaleFrames = 8;  // frames a target may go unused and still be read back
++constexpr uint32_t kVertexRing = 64u << 20;
++constexpr uint32_t kIndexRing = 16u << 20;
++constexpr uint32_t kPassConstants = 256;
++constexpr DXGI_FORMAT kBgra = DXGI_FORMAT_B8G8R8A8_UNORM;
++constexpr uint32_t kQueries = 8192;  // occlusion queries in flight, several frames of counted draws
++constexpr uint32_t kNoQuery = ~0u;
++constexpr int kLateSlots = 3;        // read-back copies in flight per surface locked without a wait
++
++using PerfClock = std::chrono::steady_clock;
++double PerfMs(PerfClock::time_point t) {
++    return std::chrono::duration<double, std::milli>(PerfClock::now() - t).count();
++}
++struct Perf {
++    double draw = 0, assemble = 0, bind = 0, sig = 0, texup = 0, compile = 0, clear = 0, copy = 0, present = 0,
++           wait = 0, swap = 0, sync = 0;
++    uint64_t draws = 0, verts = 0, upload = 0, overflow = 0, sigs = 0, sig_bytes = 0, texups = 0, texup_bytes = 0,
++             newtex = 0, targets = 0, rtups = 0, shrinks = 0, syncs = 0, psos = 0, shaders = 0, raw = 0, lates = 0;
++};
++Perf g_perf;
++struct PerfScope {
++    double& acc;
++    bool on = diag::Perf();
++    PerfClock::time_point t = on ? PerfClock::now() : PerfClock::time_point{};
++    ~PerfScope() {
++        if (on) acc += PerfMs(t);
++    }
++};
++
++bool CaptureOn() {
++    if (diag::CaptureDir().empty()) LOG_FIRST(1, "capture: set XBE_CAPTURE_DIR");
++    return !diag::CaptureDir().empty();
++}
++
++// d3d12.cpp's passes, as they are
++const char* kBlitHlsl = R"(
++cbuffer B : register(b1) { float4 uvrect; float4 opts; };
++Texture2D img : register(t0);
++Texture2D lut : register(t1);
++SamplerState ls : register(s0);
++SamplerState ps : register(s1);
++struct O { float4 p : SV_Position; float2 uv : TEXCOORD0; };
++O vs(uint id : SV_VertexID) {
++    O o;
++    float2 t = float2((id << 1) & 2, id & 2);
++    o.p = float4(t * float2(2, -2) + float2(-1, 1), 0, 1);
++    o.uv = uvrect.xy + t * uvrect.zw;
++    return o;
++}
++float4 psmain(O i) : SV_Target {
++    float4 c = 0;
++    int n = max((int)opts.z, 1);
++    float2 px = fwidth(i.uv);
++    for (int y = 0; y < n; y++)
++        for (int x = 0; x < n; x++) c += img.SampleLevel(ls, i.uv + px * ((float2(x, y) + 0.5) / n - 0.5), 0);
++    c /= n * n;
++    c.rgb *= opts.w;
++    if (opts.x > 0) c.rgb = float3(lut.Sample(ps, float2(c.r, 0.5)).r, lut.Sample(ps, float2(c.g, 0.5)).g, lut.Sample(ps, float2(c.b, 0.5)).b);
++    return float4(c.rgb, opts.y > 0 ? c.a : 1);
++}
++)";
++
++// depth is reversed in a 32 bit float buffer, as in d3d12.cpp
++constexpr DXGI_FORMAT kDepthTypeless = DXGI_FORMAT_R32G8X24_TYPELESS;
++constexpr DXGI_FORMAT kDepthFormat = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
++constexpr DXGI_FORMAT kDepthRead = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
++constexpr float kDepthFar = 0;
++
++const char* kDepthHlsl = R"(
++Texture2D<float> img : register(t0);
++SamplerState ps : register(s1);
++struct O { float4 p : SV_Position; float2 uv : TEXCOORD0; };
++O vs(uint id : SV_VertexID) {
++    O o;
++    o.uv = float2((id << 1) & 2, id & 2);
++    o.p = float4(o.uv * float2(2, -2) + float2(-1, 1), 0, 1);
++    return o;
++}
++float psmain(O i) : SV_Depth { return img.SampleLevel(ps, i.uv, 0); }
++)";
++
++const char* kClearHlsl = R"(
++cbuffer B : register(b1) { float4 colour; };
++float4 vs(uint id : SV_VertexID) : SV_Position {
++    float2 t = float2((id << 1) & 2, id & 2);
++    return float4(t * float2(2, -2) + float2(-1, 1), 0, 1);
++}
++float4 psmain() : SV_Target { return colour; }
++float depthmain() : SV_Depth { return colour.x; }
++)";
++
++float Bits(uint32_t v) {
++    float f;
++    std::memcpy(&f, &v, 4);
++    return f;
++}
++
++void Color(uint32_t argb, float* o) {
++    o[0] = ((argb >> 16) & 255) / 255.0f;
++    o[1] = ((argb >> 8) & 255) / 255.0f;
++    o[2] = (argb & 255) / 255.0f;
++    o[3] = (argb >> 24) / 255.0f;
++}
++
++// D3DBLEND, the console uses GL values
++constexpr uint32_t kBlendDestColor = 0x306;
++
++D3D11_BLEND Blend(uint32_t v, bool alpha) {
++    switch (v) {
++        case 0: return D3D11_BLEND_ZERO;
++        case 1: return D3D11_BLEND_ONE;
++        case 0x300: return alpha ? D3D11_BLEND_SRC_ALPHA : D3D11_BLEND_SRC_COLOR;
++        case 0x301: return alpha ? D3D11_BLEND_INV_SRC_ALPHA : D3D11_BLEND_INV_SRC_COLOR;
++        case 0x302: return D3D11_BLEND_SRC_ALPHA;
++        case 0x303: return D3D11_BLEND_INV_SRC_ALPHA;
++        case 0x304: return D3D11_BLEND_DEST_ALPHA;
++        case 0x305: return D3D11_BLEND_INV_DEST_ALPHA;
++        case kBlendDestColor: return alpha ? D3D11_BLEND_DEST_ALPHA : D3D11_BLEND_DEST_COLOR;
++        case 0x307: return alpha ? D3D11_BLEND_INV_DEST_ALPHA : D3D11_BLEND_INV_DEST_COLOR;
++        case 0x308: return D3D11_BLEND_SRC_ALPHA_SAT;
++        case 0x8001: case 0x8003: return D3D11_BLEND_BLEND_FACTOR;
++        case 0x8002: case 0x8004: return D3D11_BLEND_INV_BLEND_FACTOR;
++        default: return D3D11_BLEND_ONE;
++    }
++}
++
++D3D11_BLEND_OP BlendOp(uint32_t v) {
++    switch (v) {
++        case 0x800A: return D3D11_BLEND_OP_SUBTRACT;
++        case 0x800B: return D3D11_BLEND_OP_REV_SUBTRACT;
++        case 0x8007: return D3D11_BLEND_OP_MIN;
++        case 0x8008: return D3D11_BLEND_OP_MAX;
++        default: return D3D11_BLEND_OP_ADD;
++    }
++}
++
++// D3DCMP_NEVER 0x200 to D3DCMP_ALWAYS 0x207, D3D11's order from 1
++D3D11_COMPARISON_FUNC Cmp(uint32_t v) {
++    uint32_t n = v >= 0x200 && v <= 0x207 ? v - 0x200 : 7;
++    return D3D11_COMPARISON_FUNC(n + 1);
++}
++
++D3D11_STENCIL_OP StencilOp(uint32_t v) {
++    switch (v) {
++        case 0: return D3D11_STENCIL_OP_ZERO;
++        case 0x1E01: return D3D11_STENCIL_OP_REPLACE;
++        case 0x1E02: return D3D11_STENCIL_OP_INCR_SAT;
++        case 0x1E03: return D3D11_STENCIL_OP_DECR_SAT;
++        case 0x150A: return D3D11_STENCIL_OP_INVERT;
++        case 0x8507: return D3D11_STENCIL_OP_INCR;
++        case 0x8508: return D3D11_STENCIL_OP_DECR;
++        default: return D3D11_STENCIL_OP_KEEP;
++    }
++}
++
++D3D11_TEXTURE_ADDRESS_MODE Address(uint32_t v) {
++    switch (v) {
++        case 2: return D3D11_TEXTURE_ADDRESS_MIRROR;
++        case 3: case 5: return D3D11_TEXTURE_ADDRESS_CLAMP;
++        case 4: return D3D11_TEXTURE_ADDRESS_BORDER;
++        default: return D3D11_TEXTURE_ADDRESS_WRAP;
++    }
++}
++
++DXGI_FORMAT HostFormat(Host h) {
++    switch (h) {
++        case Host::BC1: return DXGI_FORMAT_BC1_UNORM;
++        case Host::BC2: return DXGI_FORMAT_BC2_UNORM;
++        case Host::BC3: return DXGI_FORMAT_BC3_UNORM;
++        case Host::R32F: return DXGI_FORMAT_R32_FLOAT;
++        default: return DXGI_FORMAT_B8G8R8A8_UNORM;
++    }
++}
++
++// a format's texel blocks: 4x4 and 8 or 16 bytes for the block compressed ones, else one 4 byte texel
++struct Blocks {
++    uint32_t side;
++    uint32_t bytes;
++};
++Blocks FormatBlocks(DXGI_FORMAT f) {
++    switch (f) {
++        case DXGI_FORMAT_BC1_UNORM: case DXGI_FORMAT_BC1_UNORM_SRGB: case DXGI_FORMAT_BC4_UNORM:
++        case DXGI_FORMAT_BC4_SNORM: return {4, 8};
++        case DXGI_FORMAT_BC2_UNORM: case DXGI_FORMAT_BC2_UNORM_SRGB: case DXGI_FORMAT_BC3_UNORM:
++        case DXGI_FORMAT_BC3_UNORM_SRGB: case DXGI_FORMAT_BC5_UNORM: case DXGI_FORMAT_BC5_SNORM:
++        case DXGI_FORMAT_BC6H_UF16: case DXGI_FORMAT_BC6H_SF16: case DXGI_FORMAT_BC7_UNORM:
++        case DXGI_FORMAT_BC7_UNORM_SRGB: return {4, 16};
++        default: return {1, 4};
++    }
++}
++
++constexpr uint32_t kFmtD16 = 0x2C;     // D3DFMT_D16
++constexpr uint32_t kFmtLinD16 = 0x30;  // D3DFMT_LIN_D16
++
++uint8_t ShadowDepthKind(uint32_t format) { return format == kFmtD16 || format == kFmtLinD16 ? 2 : 1; }
++
++uint32_t GuestPitch(uint32_t width) { return (width * 4 + 63) & ~63u; }
++
++constexpr uint32_t kSigWholeMax = 65536;
++constexpr uint32_t kSigSamples = 64;
++constexpr uint32_t kSigSampleBytes = 64;
++
++uint64_t MemSig(uint32_t data, uint32_t total) {
++    const uint8_t* p = static_cast<const uint8_t*>(kernel::HostPtr(data));
++    uint64_t sig = Hash(&total, sizeof(total));
++    g_perf.sigs++;
++    g_perf.sig_bytes += total <= kSigWholeMax ? total : kSigSamples * kSigSampleBytes;
++    if (total <= kSigWholeMax) return Hash(p, total, sig);
++    for (uint32_t i = 0; i < kSigSamples; i++) {
++        const uint8_t* sample = p + uint64_t(total - kSigSampleBytes) * i / (kSigSamples - 1);
++        sig = Hash(sample, kSigSampleBytes, sig);
++    }
++    return sig;
++}
++
++// a console surface the renderer draws into
++struct Target {
++    ComPtr<ID3D11Texture2D> res;
++    ComPtr<ID3D11RenderTargetView> rtv;
++    ComPtr<ID3D11DepthStencilView> dsv;
++    ComPtr<ID3D11ShaderResourceView> srv;
++    bool depth = false;
++    uint32_t gw = 0, gh = 0, w = 0, h = 0;
++    uint32_t data = 0, bytes = 0;
++    uint64_t epoch = 0, sig = 0;
++    bool drawn = false;
++    std::vector<uint8_t> read;
++    ComPtr<ID3D11Texture2D> fb;  // copy read by draws that sample the target they render to
++    ComPtr<ID3D11ShaderResourceView> fb_srv;
++    DXGI_FORMAT fmt = kBgra;
++};
++
++bool Changed(const Target& t) {
++    if (t.drawn || t.read.empty()) return false;
++    uint32_t row = t.gw * 4;
++    uint32_t pitch = GuestPitch(t.gw);
++    const uint8_t* p = static_cast<const uint8_t*>(kernel::HostPtr(t.data));
++    for (uint32_t y = 0; y < t.gh; y++) {
++        if (std::memcmp(p + size_t(y) * pitch, &t.read[size_t(y) * row], row)) return true;
++    }
++    return false;
++}
++
++bool LatchCpuWrite(Target& t) {
++    uint64_t e = DirtyEpoch(t.data);
++    if (e <= t.epoch) return false;
++    t.epoch = e;
++    uint64_t sig = MemSig(t.data, t.bytes);
++    if (sig == t.sig && !Changed(t)) return false;
++    t.sig = sig;
++    return true;
++}
++
++struct Tex {
++    ComPtr<ID3D11Resource> res;
++    ComPtr<ID3D11ShaderResourceView> srv;
++    TextureDesc d;
++    DXGI_FORMAT fmt = DXGI_FORMAT_UNKNOWN;
++    uint32_t w = 0, h = 0, slices = 1;  // the host texture's top level, slices of a volume
++    uint32_t levels = 1;
++    uint64_t sig = 0;
++    uint64_t frame = 0;
++    uint64_t palette = 0;
++    const Tex* swap = nullptr;
++    uint64_t pack_key = 0;
++    uint32_t pack_gen = 0;
++};
++
++struct PsoKey {
++    uint64_t vs;
++    uint64_t ps;
++    uint32_t regs;
++    uint32_t topo;
++    uint32_t has_rt;
++    uint32_t has_ds;
++    uint32_t elements[16];
++    uint32_t blend;
++    uint32_t src;
++    uint32_t dst;
++    uint32_t op;
++    uint32_t wmask;
++    uint32_t zen;
++    uint32_t zwrite;
++    uint32_t zfunc;
++    uint32_t sten;
++    uint32_t sfunc;
++    uint32_t smask;
++    uint32_t swmask;
++    uint32_t sfail;
++    uint32_t szfail;
++    uint32_t spass;
++    uint32_t cull;
++    uint32_t ccw;
++    uint32_t fill;
++    int32_t zbias;
++    float zslope;
++    uint32_t rtfmt;
++};
++
++// what Direct3D 12 keeps in a pipeline state object
++struct Pipeline {
++    ComPtr<ID3D11InputLayout> il;
++    ComPtr<ID3D11VertexShader> vs;
++    ComPtr<ID3D11PixelShader> ps;
++    ComPtr<ID3D11GeometryShader> gs;
++    ComPtr<ID3D11BlendState> bs;
++    ComPtr<ID3D11RasterizerState> rs;
++    ComPtr<ID3D11DepthStencilState> dss;
++};
++
++struct BlitOptions {
++    bool gamma = false;
++    bool alpha = false;
++    uint32_t taps = 1;
++    float mul = 1;
++    bool over = false;
++};
++
++struct DrawTextures {
++    TexInfo info[4];
++    ID3D11ShaderResourceView* srv[4] = {};
++    uint32_t levels[4] = {1, 1, 1, 1};
++    bool rt[4] = {};
++    float k[4] = {1, 1, 1, 1};
++    float wide[4] = {};
++};
++
++// what the last draw set, so the next one sets only what differs; anything else that sets them clears it
++struct DrawBinds {
++    const Pipeline* pipe = nullptr;
++    D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
++    float blend[4] = {};
++    uint32_t stencil = 0;
++    bool constants = false;  // the draw constant buffers are bound
++};
++
++struct UsedTarget {
++    uint32_t data = 0;
++    uint64_t frame = UINT64_MAX;
++};
++
++struct DrawShaders {
++    bool prog = false;
++    bool quad = false;
++    bool fixed_transform = false;
++    FixedKey fk;
++    uint64_t vkey = 0;
++    uint64_t vh = 0;
++    uint64_t pkey = 0;
++    uint64_t ph = 0;
++    ID3DBlob* vs_code = nullptr;
++    ID3DBlob* ps_code = nullptr;
++};
++
++struct GuestExtent {
++    uint32_t w;
++    uint32_t h;
++};
++
++// a dynamic buffer written front to back, discarded when it fills
++struct Ring {
++    ComPtr<ID3D11Buffer> buf;
++    uint32_t size = 0;
++    uint32_t used = 0;
++};
++
++class D3D11Backend final : public Backend {
++public:
++    ~D3D11Backend() override;
++    bool Init(uint32_t width, uint32_t height) override;
++    void Clear(const State& s, uint32_t count, const uint8_t* rects, uint32_t flags, uint32_t color, float z,
++               uint32_t stencil) override;
++    void Draw(const State& s, uint32_t prim, uint32_t start, uint32_t count, const uint8_t* indices) override;
++    void Copy(const Surface& src, const Surface& dst, uint32_t count, uint32_t src_rects, uint32_t dst_points) override;
++    void Present(const Surface& front) override;
++    void Sync(uint32_t data, uint32_t size) override;
++    void SyncLate(uint32_t data) override;
++    bool DeliverLate(uint32_t data) override;
++    void RecordLate(uint32_t data) override;
++    void Flush() override;
++    void SetGamma(const uint8_t* ramp) override;
++    void ClearReport() override { counted_.clear(); }
++    void GetReport(uint32_t report) override { reports_.push_back({report, counted_}); }
++
++private:
++    // the context is the render thread's; DeliverLate's reads on the title's thread take this too
++    std::recursive_mutex ctx_lock_;
++
++    bool CreateDevice();
++    bool CreateSwapChain(HWND hwnd);
++    void CreateBackBufferView();
++    bool CreateBuffers();
++    void CreateGammaLut();
++    void ResizeSwap();
++    std::string Profile(const char* stage) const;
++    ID3DBlob* Compile(const std::string& src, const char* entry, const char* stage, uint64_t& hash);
++    ID3D11VertexShader* VertexShader(uint64_t hash, ID3DBlob* code);
++    ID3D11PixelShader* PixelShader(uint64_t hash, ID3DBlob* code);
++    ID3D11GeometryShader* GeometryShader(uint64_t hash, ID3DBlob* code);
++    bool Put(Ring& r, const void* src, uint32_t n, uint32_t align, ID3D11Buffer*& buf, uint32_t& offset);
++    void WriteConstants(ID3D11Buffer* cb, const void* src, size_t n);
++    void SetFullViewport(uint32_t w, uint32_t h);
++    void SetScissor(const D3D11_RECT& r) { ctx_->RSSetScissorRects(1, &r); }
++    void SetTargets(ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv);
++    void SetBlitTarget(ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h);
++    // full screen passes
++    Pipeline* FullScreenPipeline(uint64_t key, const char* hlsl, const char* ps_entry, const D3D11_BLEND_DESC& bd,
++                                 const D3D11_DEPTH_STENCIL_DESC& dd);
++    void DrawFullScreen(const Pipeline& p, const float* constants, size_t n, ID3D11ShaderResourceView* const* srvs,
++                        uint32_t srv_count, uint32_t stencil = 0, const float* factor = nullptr);
++    void Blit(ID3D11ShaderResourceView* src, const float uvrect[4], const BlitOptions& o);
++    Pipeline* BlitPipeline(bool over);
++    void BindBlitSamplers();
++    ID3D11ShaderResourceView* Feedback(Target& t);
++    // Draw's steps
++    bool DepthCopy(const State& s);
++    bool AssembleDraw(const State& s, uint32_t prim, uint32_t start, uint32_t count, const uint8_t* indices,
++                      Assembled& a);
++    bool BindTargets(const State& s);
++    void EnsureVertexShader(const State& s, const Assembled& a, DrawShaders& sh);
++    bool BindStageTexturesAndTargets(const State& s, DrawTextures& stages);
++    ID3D11ShaderResourceView* BindTexture(const State& s, int stage, DrawTextures& stages);
++    ID3D11ShaderResourceView* BindTargetTexture(const State& s, int stage, const TextureDesc& d, Target& t, bool box,
++                                                DrawTextures& stages);
++    ID3D11ShaderResourceView* BindGuestTexture(const State& s, int stage, const TextureDesc& d, const FormatInfo& fi,
++                                               DrawTextures& stages);
++    bool CreateTexture(Tex& tx, const TextureDesc& d, const FormatInfo& fi, uint64_t key);
++    void UploadTexture(Tex& tx, const TextureDesc& d, const FormatInfo& fi, const uint8_t* p, const uint32_t* colours);
++    void UploadTextureLevel(Tex& tx, uint32_t f, uint32_t l, const std::vector<uint8_t>& px, uint32_t pitch);
++    void LatchPackKey(Tex& tx, const TextureDesc& d, const FormatInfo& fi, const uint32_t* colours);
++    void LatchPackImage(Tex& tx);
++    void CreatePackTexture(Tex& r, const texturedumper::Image& img);
++    void EnsurePixelShader(const PixelKey& pk, DrawShaders& sh);
++    void BuildPipelineKey(const State& s, const Assembled& a, uint64_t vh, uint64_t ph, PsoKey& k);
++    void KeyDepthStencil(const State& s, const Assembled& a, PsoKey& k);
++    Pipeline* EnsurePipeline(const PsoKey& k, const DrawShaders& sh);
++    float TargetScale() const;
++    float RenderTargetShift(const State& s, const DrawShaders& sh) const;
++    void FillDepthConstants(const State& s, const DrawShaders& sh, const PsoKey& k, DrawConstants& c) const;
++    void UploadConstants(const State& s, const DrawShaders& sh, const PsoKey& k, const DrawTextures& stages,
++                         GuestExtent size, DrawConstants& c);
++    void FillTextureConstants(const State& s, const DrawShaders& sh, const DrawTextures& stages, DrawConstants& c);
++    void FillTexelConstants(int i, const TextureDesc& d, const DrawTextures& stages, DrawConstants& c);
++    void CaptureDraw(const State& s, uint32_t prim, uint32_t count, const PsoKey& k, const DrawConstants& c,
++                     const DrawTextures& stages);
++    void CaptureInputs(const State& s, const Assembled& a, const DrawConstants& c);
++    void CaptureShader(const char* kind, uint64_t key, const std::string& src);
++    void CaptureShaders(const State& s, const Assembled& a, const DrawShaders& sh, const PixelKey& pk);
++    void SetTextureViewsAndSamplers(const State& s, const Assembled& a, DrawTextures& stages);
++    void SetViewportScissor(const State& s, uint32_t gw);
++    void SetPipeline(const Pipeline& p, const State& s);
++    void UpdateTargetUsed(uint32_t data);
++    void DrawGeometry(const Assembled& a);
++    uint32_t BeginCountedDraw(const State& s);
++    void EndCountedDraw(uint32_t query);
++    float SamplesPerPixel() const;
++    void DeliverReports();
++    // Present's steps
++    void FinishCapture(const Surface& front);
++    void StartCapture();
++    void UploadGammaRamp();
++    void DrawFrame(Target* t);
++    void BlitFrame(Target& t);
++    void RenderUi();
++    void ReleaseOldTextures();
++    void CountFps();
++    void ApplySettings();
++    // targets
++    struct TargetSlot {
++        uint32_t data;
++        uint64_t key;
++        uint32_t gw;
++        uint32_t gh;
++        std::unordered_map<uint64_t, Target>::iterator it;
++        bool sized;
++    };
++    Target* FindTarget(const Surface& s, bool depth);
++    Target* EnsureTarget(const Surface& s, bool depth);
++    TargetSlot FindTargetSlot(const Surface& s, bool depth);
++    uint64_t SizedTargetKey(uint32_t data, bool depth, uint32_t gw, uint32_t gh) const;
++    bool TargetStale(uint32_t data) const;
++    void ReleaseTarget(std::unordered_map<uint64_t, Target>::iterator it);
++    bool CreateTargetResource(Target& t);
++    void UploadTarget(Target& t, const Surface& s);
++    struct PixelTexture {
++        ComPtr<ID3D11Texture2D> tex;
++        ComPtr<ID3D11ShaderResourceView> srv;
++    };
++    PixelTexture CreatePixelTexture(const std::vector<uint8_t>& px, uint32_t pitch, uint32_t w, uint32_t h);
++    struct ClearArgs {
++        uint32_t count;
++        const uint8_t* rects;
++        uint32_t flags;
++        uint32_t color;
++        float z;
++        uint32_t stencil;
++    };
++    void ClearTarget(Target& t, const State& s, const ClearArgs& c, std::vector<D3D11_RECT>& rs);
++    void ClearChannels(Target& t, const float col[4], uint8_t mask, const std::vector<D3D11_RECT>& rs);
++    void ClearDepthRects(Target& t, uint32_t flags, float depth, uint32_t stencil, const std::vector<D3D11_RECT>& rs);
++    struct CopyList {
++        uint32_t count;
++        uint32_t src_rects;
++        uint32_t dst_points;
++    };
++    void CopyByDraw(const Target& src_t, Target& dst_t, const CopyList& l);
++    void CopyByRegion(const Target& src_t, Target& dst_t, const CopyList& l);
++    // read-backs
++    ComPtr<ID3D11Texture2D> Shrink(ID3D11ShaderResourceView* src, uint32_t w, uint32_t h, uint32_t taps, float mul,
++                                   ID3D11Texture2D* into = nullptr);
++    ComPtr<ID3D11Texture2D> CopySource(Target& t, ID3D11Texture2D* into = nullptr);
++    bool ReadBack(ID3D11Texture2D* res, uint32_t w, uint32_t h, std::vector<uint8_t>& out);
++    struct Late;
++    void RecordLateCopy(Late& l, uint32_t slot, ID3D11Texture2D* src);
++    // F3 captures
++    void CapStep(const Surface& rt);
++    void CapSave(ID3D11ShaderResourceView* srv, uint32_t w, uint32_t h, const char* name);
++    void CapSave(Target& t, const char* name) { CapSave(t.srv.Get(), t.gw, t.gh, name); }
++
++    ComPtr<IDXGIFactory1> factory_;
++    ComPtr<ID3D11Device> dev_;
++    ComPtr<ID3D11DeviceContext> ctx_;
++    ComPtr<IDXGISwapChain> swap_;
++    ComPtr<ID3D11RenderTargetView> bb_rtv_;
++    D3D_FEATURE_LEVEL level_ = D3D_FEATURE_LEVEL_11_0;
++    bool flip_ = false;
++    bool tearing_ = false;
++    bool ui_ = false;
++    Ring vertices_;
++    Ring indices_;
++    ComPtr<ID3D11Buffer> cb_vsc_;
++    ComPtr<ID3D11Buffer> cb_dc_;
++    ComPtr<ID3D11Buffer> cb_pass_;
++    decltype(State::vsc) last_vsc_{};
++    bool vsc_set_ = false;
++    DrawConstants last_dc_{};
++    bool dc_set_ = false;
++    std::vector<ComPtr<ID3D11Buffer>> oversized_;  // uploads too big for a ring, kept until the present
++    std::unordered_map<uint64_t, ComPtr<ID3DBlob>> blobs_;
++    std::unordered_map<uint64_t, uint64_t> shader_src_;
++    std::unordered_map<uint64_t, ComPtr<ID3D11VertexShader>> vss_;
++    std::unordered_map<uint64_t, ComPtr<ID3D11PixelShader>> pss_;
++    std::unordered_map<uint64_t, ComPtr<ID3D11GeometryShader>> gss_;
++    std::unordered_map<uint64_t, Pipeline> pipes_;
++    std::unordered_map<uint64_t, Pipeline> passes_;
++    std::unordered_map<uint64_t, std::array<ComPtr<ID3D11SamplerState>, 4>> samplers_;
++    std::array<ComPtr<ID3D11SamplerState>, 4> blit_samplers_;
++    std::unordered_map<uint64_t, Target> targets_;
++    std::unordered_map<uint32_t, uint64_t> target_used_;
++    std::array<UsedTarget, 4> recent_used_{};
++    uint32_t recent_used_next_ = 0;
++    DrawBinds binds_;
++    std::unordered_map<uint64_t, Tex> textures_;
++    std::unordered_map<uint64_t, Tex> pack_textures_;
++    FILE* cap_ = nullptr;
++    std::filesystem::path cap_dir_;
++    uint32_t cap_i_ = 0;
++    uint32_t cap_rt_ = 0;
++    std::unordered_set<uint32_t> cap_seen_;
++    std::unordered_set<uint64_t> cap_sh_;
++    struct CapTex {
++        ComPtr<ID3D11ShaderResourceView> srv;
++        uint32_t data;
++        uint32_t w;
++        uint32_t h;
++    };
++    std::vector<CapTex> cap_tex_;
++    ComPtr<ID3D11Texture2D> lut_;
++    ComPtr<ID3D11ShaderResourceView> lut_srv_;
++    uint8_t ramp_[768] = {};
++    bool ramp_dirty_ = false;
++    bool gamma_ = false;
++    Target* bound_rt_ = nullptr;
++    Target* bound_ds_ = nullptr;
++    Target* draw_rt_ = nullptr;
++    Target* draw_ds_ = nullptr;
++    uint32_t guest_w_ = 640;
++    uint32_t guest_h_ = 480;
++    uint32_t bb_w_ = 0;
++    uint32_t bb_h_ = 0;
++    float scale_ = 1.0f;
++    uint64_t frame_ = 0;
++    // surfaces locked without a wait: copies in flight, the newest finished one goes to guest memory
++    struct Late {
++        ComPtr<ID3D11Texture2D> rb[kLateSlots];
++        ComPtr<ID3D11Query> done[kLateSlots];
++        uint64_t seq[kLateSlots] = {};
++        uint64_t frame[kLateSlots] = {};
++        uint64_t delivered = 0;
++        ComPtr<ID3D11Texture2D> down;
++        uint32_t gw = 0;
++        uint32_t gh = 0;
++        uint32_t next = 0;
++    };
++    std::unordered_map<uint32_t, Late> late_;
++    std::mutex late_lock_;
++    uint64_t late_seq_ = 0;
++    std::atomic<uint64_t> presents_seen_{0};
++    Assembled asm_;
++    struct Query {
++        uint32_t index;
++        float samples_per_pixel;
++    };
++    struct Report {
++        uint32_t va;
++        std::vector<Query> queries;
++    };
++    std::vector<ComPtr<ID3D11Query>> queries_;
++    uint32_t query_next_ = 0;
++    std::vector<Query> counted_;
++    std::deque<Report> reports_;
++    uint64_t presents_ = 0;
++    double fps_ = 0;
++    std::chrono::steady_clock::time_point fps_t_ = std::chrono::steady_clock::now();
++    uint64_t fps_n_ = 0;
++};
++
++D3D11Backend::~D3D11Backend() {
++    if (ui_) ImGui_ImplDX11_Shutdown();
++}
++
++bool D3D11Backend::Init(uint32_t width, uint32_t height) {
++    std::lock_guard lock(ctx_lock_);
++    g_reversed_depth = true;
++    guest_w_ = width;
++    guest_h_ = height;
++    HWND hwnd = static_cast<HWND>(app::Window());
++    if (!CreateDevice()) return false;
++    if (!CreateSwapChain(hwnd)) return false;
++    if (!CreateBuffers()) return false;
++    CreateGammaLut();
++    ui_ = ImGui_ImplDX11_Init(dev_.Get(), ctx_.Get());
++    scale_ = app::RenderScale(guest_h_);
++    texturedumper::Update();
++    queries_.resize(kQueries);
++    LOGI("d3d11: %ux%u guest, %ux%u window, render scale %.3f", width, height, bb_w_, bb_h_, scale_);
++    return true;
++}
++
++bool D3D11Backend::CreateDevice() {
++    const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1,
++                                        D3D_FEATURE_LEVEL_10_0};
++    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
++    if (GetEnvironmentVariableW(L"XBE_D3D12_DEBUG", nullptr, 0)) flags |= D3D11_CREATE_DEVICE_DEBUG;
++    // dedicated GPU first on hybrid laptops
++    ComPtr<IDXGIFactory1> f1;
++    ComPtr<IDXGIAdapter1> adapter;
++    if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&f1)))) {
++        ComPtr<IDXGIFactory6> f6;
++        if (SUCCEEDED(f1.As(&f6))) f6->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter));
++    }
++    auto make = [&](IDXGIAdapter1* a, UINT fl) {
++        HRESULT hr = D3D11CreateDevice(a, a ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr, fl, levels,
++                                       UINT(std::size(levels)), D3D11_SDK_VERSION, &dev_, &level_, &ctx_);
++        // 11_1 is unknown to Windows 7 without its platform update
++        if (hr == E_INVALIDARG) {
++            hr = D3D11CreateDevice(a, a ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr, fl, levels + 1,
++                                   UINT(std::size(levels) - 1), D3D11_SDK_VERSION, &dev_, &level_, &ctx_);
++        }
++        return SUCCEEDED(hr);
++    };
++    bool made = make(adapter.Get(), flags) || make(nullptr, flags);
++    if (!made && (flags & D3D11_CREATE_DEVICE_DEBUG)) {
++        flags &= ~D3D11_CREATE_DEVICE_DEBUG;  // the debug layer is not installed
++        made = make(adapter.Get(), flags) || make(nullptr, flags);
++    }
++    if (!made) {
++        LOGE("d3d11: no device");
++        return false;
++    }
++    // the swap chain comes from the factory that made the device's adapter
++    ComPtr<IDXGIDevice> dxgi;
++    ComPtr<IDXGIAdapter> used;
++    if (FAILED(dev_.As(&dxgi)) || FAILED(dxgi->GetAdapter(&used)) || FAILED(used->GetParent(IID_PPV_ARGS(&factory_)))) {
++        LOGE("d3d11: no DXGI factory");
++        return false;
++    }
++    ComPtr<IDXGIDevice1> dxgi1;
++    if (SUCCEEDED(dev_.As(&dxgi1))) dxgi1->SetMaximumFrameLatency(2);
++    DXGI_ADAPTER_DESC ad{};
++    used->GetDesc(&ad);
++    LOGR("D3D11 adapter: %ls, feature level %X", ad.Description, unsigned(level_));
++    return true;
++}
++
++bool D3D11Backend::CreateSwapChain(HWND hwnd) {
++    RECT rc;
++    GetClientRect(hwnd, &rc);
++    bb_w_ = std::max<LONG>(rc.right - rc.left, 1);
++    bb_h_ = std::max<LONG>(rc.bottom - rc.top, 1);
++    // a flip swap chain on Windows 10, its predecessor on Windows 8, a blit one before that
++    ComPtr<IDXGIFactory2> f2;
++    if (SUCCEEDED(factory_.As(&f2))) {
++        ComPtr<IDXGIFactory5> f5;
++        BOOL tear = FALSE;
++        if (SUCCEEDED(factory_.As(&f5))) f5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &tear, sizeof(tear));
++        for (DXGI_SWAP_EFFECT effect : {DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL}) {
++            DXGI_SWAP_CHAIN_DESC1 sd{};
++            sd.Width = bb_w_;
++            sd.Height = bb_h_;
++            sd.Format = kBgra;
++            sd.SampleDesc.Count = 1;
++            sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
++            sd.BufferCount = 2;
++            sd.SwapEffect = effect;
++            sd.Flags = tear ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
++            ComPtr<IDXGISwapChain1> sc1;
++            if (SUCCEEDED(f2->CreateSwapChainForHwnd(dev_.Get(), hwnd, &sd, nullptr, nullptr, &sc1))) {
++                swap_ = sc1;
++                flip_ = true;
++                tearing_ = tear;
++                break;
++            }
++        }
++    }
++    if (!swap_) {
++        DXGI_SWAP_CHAIN_DESC sd{};
++        sd.BufferDesc.Width = bb_w_;
++        sd.BufferDesc.Height = bb_h_;
++        sd.BufferDesc.Format = kBgra;
++        sd.SampleDesc.Count = 1;
++        sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
++        sd.BufferCount = 1;
++        sd.OutputWindow = hwnd;
++        sd.Windowed = TRUE;
++        sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
++        if (FAILED(factory_->CreateSwapChain(dev_.Get(), &sd, &swap_))) {
++            LOGE("d3d11: no swap chain");
++            return false;
++        }
++    }
++    factory_->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
++    CreateBackBufferView();
++    LOGI("d3d11: %s swap chain%s", flip_ ? "flip" : "blit", tearing_ ? ", tearing allowed" : "");
++    return true;
++}
++
++void D3D11Backend::CreateBackBufferView() {
++    ComPtr<ID3D11Texture2D> bb;
++    swap_->GetBuffer(0, IID_PPV_ARGS(&bb));
++    dev_->CreateRenderTargetView(bb.Get(), nullptr, &bb_rtv_);
++}
++
++bool D3D11Backend::CreateBuffers() {
++    auto dynamic = [&](UINT bytes, UINT bind, ComPtr<ID3D11Buffer>& out) {
++        D3D11_BUFFER_DESC bd{};
++        bd.ByteWidth = bytes;
++        bd.Usage = D3D11_USAGE_DYNAMIC;
++        bd.BindFlags = bind;
++        bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
++        return SUCCEEDED(dev_->CreateBuffer(&bd, nullptr, &out));
++    };
++    auto cb_size = [](size_t n) { return UINT((n + 15) & ~size_t(15)); };
++    vertices_.size = kVertexRing;
++    indices_.size = kIndexRing;
++    bool ok = dynamic(kVertexRing, D3D11_BIND_VERTEX_BUFFER, vertices_.buf) &&
++              dynamic(kIndexRing, D3D11_BIND_INDEX_BUFFER, indices_.buf) &&
++              dynamic(cb_size(sizeof(State::vsc)), D3D11_BIND_CONSTANT_BUFFER, cb_vsc_) &&
++              dynamic(cb_size(sizeof(DrawConstants)), D3D11_BIND_CONSTANT_BUFFER, cb_dc_) &&
++              dynamic(kPassConstants, D3D11_BIND_CONSTANT_BUFFER, cb_pass_);
++    if (!ok) LOGE("d3d11: buffers could not be made");
++    // four clamp samplers: linear at slot 0, point at slots 1 to 3
++    for (int i = 0; ok && i < 4; i++) {
++        D3D11_SAMPLER_DESC sd{};
++        sd.Filter = i == 0 ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_MIN_MAG_MIP_POINT;
++        sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
++        sd.MaxAnisotropy = 1;
++        sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
++        sd.MaxLOD = D3D11_FLOAT32_MAX;
++        ok = SUCCEEDED(dev_->CreateSamplerState(&sd, &blit_samplers_[i]));
++    }
++    return ok;
++}
++
++// gamma ramp as a 256 x 1 lookup
++void D3D11Backend::CreateGammaLut() {
++    D3D11_TEXTURE2D_DESC td{256, 1, 1, 1, kBgra, {1, 0}, D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE, 0, 0};
++    dev_->CreateTexture2D(&td, nullptr, &lut_);
++    if (lut_) dev_->CreateShaderResourceView(lut_.Get(), nullptr, &lut_srv_);
++}
++
++void D3D11Backend::Flush() {
++    std::lock_guard lock(ctx_lock_);
++    ctx_->Flush();
++}
++
++// shader models by feature level: 5 from 11_0, 4 below
++std::string D3D11Backend::Profile(const char* stage) const {
++    const char* model = level_ >= D3D_FEATURE_LEVEL_11_0 ? "_5_0" : level_ >= D3D_FEATURE_LEVEL_10_1 ? "_4_1" : "_4_0";
++    return std::string(stage) + model;
++}
++
++ID3DBlob* D3D11Backend::Compile(const std::string& src, const char* entry, const char* stage, uint64_t& hash) {
++    std::string profile = Profile(stage);
++    uint64_t profile_seed = Hash(profile.data(), profile.size());
++    uint64_t entry_seed = Hash(entry, std::strlen(entry), profile_seed);
++    hash = Hash(src.data(), src.size(), entry_seed);
++    auto it = blobs_.find(hash);
++    if (it != blobs_.end()) return it->second.Get();
++    ComPtr<ID3DBlob> code;
++    ComPtr<ID3DBlob> err;
++    PerfScope perf_compile{g_perf.compile};
++    g_perf.shaders++;
++    HRESULT hr = D3DCompile(src.data(), src.size(), nullptr, nullptr, nullptr, entry, profile.c_str(),
++                            D3DCOMPILE_OPTIMIZATION_LEVEL1, 0, &code, &err);
++    if (FAILED(hr)) {
++        LOGE("d3d11: %s compile failed: %s", profile.c_str(), err ? static_cast<const char*>(err->GetBufferPointer()) : "?");
++        LOGE("%s", src.c_str());
++        blobs_[hash] = nullptr;
++        return nullptr;
++    }
++    blobs_[hash] = code;
++    return code.Get();
++}
++
++ID3D11VertexShader* D3D11Backend::VertexShader(uint64_t hash, ID3DBlob* code) {
++    auto& s = vss_[hash];
++    if (!s && code) dev_->CreateVertexShader(code->GetBufferPointer(), code->GetBufferSize(), nullptr, &s);
++    return s.Get();
++}
++
++ID3D11PixelShader* D3D11Backend::PixelShader(uint64_t hash, ID3DBlob* code) {
++    auto& s = pss_[hash];
++    if (!s && code) dev_->CreatePixelShader(code->GetBufferPointer(), code->GetBufferSize(), nullptr, &s);
++    return s.Get();
++}
++
++ID3D11GeometryShader* D3D11Backend::GeometryShader(uint64_t hash, ID3DBlob* code) {
++    auto& s = gss_[hash];
++    if (!s && code) dev_->CreateGeometryShader(code->GetBufferPointer(), code->GetBufferSize(), nullptr, &s);
++    return s.Get();
++}
++
++// n bytes into the ring: written after what the GPU may still read, or at the start of a new buffer when it is full
++bool D3D11Backend::Put(Ring& r, const void* src, uint32_t n, uint32_t align, ID3D11Buffer*& buf, uint32_t& offset) {
++    g_perf.upload += n;
++    if (n > r.size / 4) {
++        // too big for the ring: a buffer of its own, kept until the present
++        g_perf.overflow++;
++        D3D11_BUFFER_DESC bd{};
++        bd.ByteWidth = (n + 15) & ~15u;
++        bd.Usage = D3D11_USAGE_IMMUTABLE;
++        r.buf->GetDesc(&bd);
++        bd.ByteWidth = (n + 15) & ~15u;
++        bd.Usage = D3D11_USAGE_IMMUTABLE;
++        bd.CPUAccessFlags = 0;
++        std::vector<uint8_t> padded(bd.ByteWidth, 0);
++        std::memcpy(padded.data(), src, n);
++        D3D11_SUBRESOURCE_DATA init{padded.data(), 0, 0};
++        ComPtr<ID3D11Buffer> own;
++        if (FAILED(dev_->CreateBuffer(&bd, &init, &own))) return false;
++        buf = own.Get();
++        offset = 0;
++        oversized_.push_back(std::move(own));
++        return true;
++    }
++    uint32_t o = (r.used + align - 1) & ~(align - 1);
++    D3D11_MAP mode = D3D11_MAP_WRITE_NO_OVERWRITE;
++    if (o + n > r.size || r.used == 0) {
++        o = 0;
++        mode = D3D11_MAP_WRITE_DISCARD;
++    }
++    D3D11_MAPPED_SUBRESOURCE m;
++    if (FAILED(ctx_->Map(r.buf.Get(), 0, mode, 0, &m))) return false;
++    std::memcpy(static_cast<uint8_t*>(m.pData) + o, src, n);
++    ctx_->Unmap(r.buf.Get(), 0);
++    r.used = o + n;
++    buf = r.buf.Get();
++    offset = o;
++    return true;
++}
++
++void D3D11Backend::WriteConstants(ID3D11Buffer* cb, const void* src, size_t n) {
++    D3D11_MAPPED_SUBRESOURCE m;
++    if (FAILED(ctx_->Map(cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) return;
++    std::memcpy(m.pData, src, n);
++    ctx_->Unmap(cb, 0);
++}
++
++void D3D11Backend::SetFullViewport(uint32_t w, uint32_t h) {
++    D3D11_VIEWPORT vp{0, 0, float(w), float(h), 0, 1};
++    D3D11_RECT scissor{0, 0, LONG(w), LONG(h)};
++    ctx_->RSSetViewports(1, &vp);
++    ctx_->RSSetScissorRects(1, &scissor);
++}
++
++// a draw's targets; the views a shader reads that are now among them are unbound by the runtime
++void D3D11Backend::SetTargets(ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv) {
++    ctx_->OMSetRenderTargets(rtv ? 1 : 0, rtv ? &rtv : nullptr, dsv);
++}
++
++void D3D11Backend::SetBlitTarget(ID3D11RenderTargetView* rtv, uint32_t w, uint32_t h) {
++    ID3D11ShaderResourceView* none[4] = {};
++    ctx_->PSSetShaderResources(0, 4, none);  // the target may be one a draw read
++    SetTargets(rtv, nullptr);
++    bound_rt_ = bound_ds_ = nullptr;
++    SetFullViewport(w, h);
++}
++
++D3D11_BLEND_DESC OpaqueBlend(uint8_t mask = D3D11_COLOR_WRITE_ENABLE_ALL) {
++    D3D11_BLEND_DESC bd{};
++    auto& b = bd.RenderTarget[0];
++    b.SrcBlend = b.SrcBlendAlpha = D3D11_BLEND_ONE;
++    b.DestBlend = b.DestBlendAlpha = D3D11_BLEND_ZERO;
++    b.BlendOp = b.BlendOpAlpha = D3D11_BLEND_OP_ADD;
++    b.RenderTargetWriteMask = mask;
++    return bd;
++}
++
++D3D11_DEPTH_STENCIL_DESC NoDepth() {
++    D3D11_DEPTH_STENCIL_DESC dd{};
++    dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
++    dd.DepthFunc = D3D11_COMPARISON_ALWAYS;
++    D3D11_DEPTH_STENCILOP_DESC keep{D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP, D3D11_STENCIL_OP_KEEP,
++                                    D3D11_COMPARISON_ALWAYS};
++    dd.FrontFace = dd.BackFace = keep;
++    dd.StencilReadMask = dd.StencilWriteMask = 0xFF;
++    return dd;
++}
++
++// a full screen pass: solid, no culling, scissored, its blend and depth as given; kept in passes_ by key
++Pipeline* D3D11Backend::FullScreenPipeline(uint64_t key, const char* hlsl, const char* ps_entry,
++                                           const D3D11_BLEND_DESC& bd, const D3D11_DEPTH_STENCIL_DESC& dd) {
++    auto it = passes_.find(key);
++    if (it != passes_.end()) return it->second.vs ? &it->second : nullptr;
++    Pipeline& p = passes_[key];
++    uint64_t vh;
++    uint64_t ph;
++    ID3DBlob* vs = Compile(hlsl, "vs", "vs", vh);
++    ID3DBlob* ps = Compile(hlsl, ps_entry, "ps", ph);
++    if (!vs || !ps) return nullptr;
++    D3D11_RASTERIZER_DESC rd{};
++    rd.FillMode = D3D11_FILL_SOLID;
++    rd.CullMode = D3D11_CULL_NONE;
++    rd.DepthClipEnable = TRUE;
++    rd.ScissorEnable = TRUE;
++    p.vs = VertexShader(vh, vs);
++    p.ps = PixelShader(ph, ps);
++    dev_->CreateBlendState(&bd, &p.bs);
++    dev_->CreateRasterizerState(&rd, &p.rs);
++    dev_->CreateDepthStencilState(&dd, &p.dss);
++    if (!p.vs || !p.ps || !p.bs || !p.rs || !p.dss) {
++        p = {};
++        return nullptr;
++    }
++    return &p;
++}
++
++// the full screen triangle: constants at b0 and b1, srvs from t0; the blit samplers unless the caller set others
++void D3D11Backend::DrawFullScreen(const Pipeline& p, const float* constants, size_t n,
++                                  ID3D11ShaderResourceView* const* srvs, uint32_t srv_count, uint32_t stencil,
++                                  const float* factor) {
++    binds_ = {};
++    float c[kPassConstants / 4] = {};
++    if (constants) std::memcpy(c, constants, std::min(n, sizeof(c)));
++    WriteConstants(cb_pass_.Get(), c, sizeof(c));
++    ID3D11Buffer* cbs[2] = {cb_pass_.Get(), cb_pass_.Get()};
++    ctx_->IASetInputLayout(nullptr);
++    ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
++    ctx_->VSSetShader(p.vs.Get(), nullptr, 0);
++    ctx_->GSSetShader(nullptr, nullptr, 0);
++    ctx_->PSSetShader(p.ps.Get(), nullptr, 0);
++    ctx_->VSSetConstantBuffers(0, 2, cbs);
++    ctx_->PSSetConstantBuffers(0, 2, cbs);
++    if (srv_count) ctx_->PSSetShaderResources(0, srv_count, srvs);
++    float none[4] = {0, 0, 0, 0};
++    ctx_->OMSetBlendState(p.bs.Get(), factor ? factor : none, 0xFFFFFFFF);
++    ctx_->OMSetDepthStencilState(p.dss.Get(), stencil);
++    ctx_->RSSetState(p.rs.Get());
++    ctx_->Draw(3, 0);
++}
++
++void D3D11Backend::BindBlitSamplers() {
++    ID3D11SamplerState* s[4] = {blit_samplers_[0].Get(), blit_samplers_[1].Get(), blit_samplers_[2].Get(),
++                                blit_samplers_[3].Get()};
++    ctx_->PSSetSamplers(0, 4, s);
++}
++
++constexpr uint64_t kBlitKey = 0xB117;
++constexpr uint64_t kDepthCopyKey = 0xDE97;
++constexpr uint64_t kClearKey = 0xC1EA << 8;       // | channel mask
++constexpr uint64_t kDepthClearKey = 0xDC1EA << 4;  // | clear flags
++
++Pipeline* D3D11Backend::BlitPipeline(bool over) {
++    D3D11_BLEND_DESC bd = OpaqueBlend();
++    if (over) {
++        // premultiplied colour, the target keeps its alpha
++        auto& b = bd.RenderTarget[0];
++        b.BlendEnable = TRUE;
++        b.SrcBlend = D3D11_BLEND_ONE;
++        b.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
++        b.SrcBlendAlpha = D3D11_BLEND_ZERO;
++        b.DestBlendAlpha = D3D11_BLEND_ONE;
++    }
++    return FullScreenPipeline(kBlitKey | uint64_t(over) << 32, kBlitHlsl, "psmain", bd, NoDepth());
++}
++
++void D3D11Backend::Blit(ID3D11ShaderResourceView* src, const float uvrect[4], const BlitOptions& o) {
++    Pipeline* p = BlitPipeline(o.over);
++    if (!p) return;
++    float c[8] = {uvrect[0], uvrect[1], uvrect[2], uvrect[3],
++                  o.gamma ? 1.0f : 0.0f, o.alpha ? 1.0f : 0.0f, float(o.taps), o.mul};
++    ID3D11ShaderResourceView* srvs[2] = {src, lut_srv_.Get()};
++    BindBlitSamplers();
++    DrawFullScreen(*p, c, sizeof(c), srvs, 2);
++}
++
++// a copy of the target to read while drawing to it
++ID3D11ShaderResourceView* D3D11Backend::Feedback(Target& t) {
++    if (!t.fb) {
++        D3D11_TEXTURE2D_DESC td;
++        t.res->GetDesc(&td);
++        td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
++        if (FAILED(dev_->CreateTexture2D(&td, nullptr, &t.fb))) return nullptr;
++        D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
++        sv.Format = t.depth ? kDepthRead : t.fmt;
++        sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
++        sv.Texture2D.MipLevels = 1;
++        if (FAILED(dev_->CreateShaderResourceView(t.fb.Get(), &sv, &t.fb_srv))) return nullptr;
++    }
++    ctx_->CopyResource(t.fb.Get(), t.res.Get());
++    return t.fb_srv.Get();
++}
++
++void D3D11Backend::ReleaseTarget(std::unordered_map<uint64_t, Target>::iterator it) {
++    if (bound_rt_ == &it->second || bound_ds_ == &it->second) bound_rt_ = bound_ds_ = nullptr;
++    targets_.erase(it);
++}
++
++// the host texture of a new target at render scale, its views, cleared
++bool D3D11Backend::CreateTargetResource(Target& t) {
++    t.w = std::max(1u, uint32_t(std::lround(t.gw * scale_)));
++    t.h = std::max(1u, uint32_t(std::lround(t.gh * scale_)));
++    D3D11_TEXTURE2D_DESC td{t.w, t.h, 1, 1, DXGI_FORMAT_UNKNOWN, {1, 0}, D3D11_USAGE_DEFAULT, 0, 0, 0};
++    D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
++    sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
++    sv.Texture2D.MipLevels = 1;
++    if (t.depth) {
++        td.Format = kDepthTypeless;
++        td.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
++        if (FAILED(dev_->CreateTexture2D(&td, nullptr, &t.res))) return false;
++        D3D11_DEPTH_STENCIL_VIEW_DESC dv{};
++        dv.Format = kDepthFormat;
++        dv.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
++        if (FAILED(dev_->CreateDepthStencilView(t.res.Get(), &dv, &t.dsv))) return false;
++        sv.Format = kDepthRead;
++        ctx_->ClearDepthStencilView(t.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, kDepthFar, 0);
++    } else {
++        td.Format = t.fmt;
++        td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
++        if (FAILED(dev_->CreateTexture2D(&td, nullptr, &t.res))) return false;
++        if (FAILED(dev_->CreateRenderTargetView(t.res.Get(), nullptr, &t.rtv))) return false;
++        sv.Format = t.fmt;
++        float black[4] = {0, 0, 0, 0};
++        ctx_->ClearRenderTargetView(t.rtv.Get(), black);
++    }
++    return SUCCEEDED(dev_->CreateShaderResourceView(t.res.Get(), &sv, &t.srv));
++}
++
++uint64_t TargetMapKey(uint32_t data, bool depth) { return uint64_t(data) << 1 | (depth ? 1 : 0); }
++
++constexpr int kKeyWidthShift = 34;
++constexpr int kKeyHeightShift = 48;
++
++uint64_t D3D11Backend::SizedTargetKey(uint32_t data, bool depth, uint32_t gw, uint32_t gh) const {
++    uint64_t key = TargetMapKey(data, depth);
++    bool small_depth = depth && (gw != guest_w_ || gh != guest_h_);
++    if (!small_depth) return key;
++    return key | uint64_t(gw) << kKeyWidthShift | uint64_t(gh) << kKeyHeightShift;
++}
++
++D3D11Backend::TargetSlot D3D11Backend::FindTargetSlot(const Surface& s, bool depth) {
++    TargetSlot slot;
++    slot.data = mem::VirtualFromPhysical(s.data);
++    SurfaceSize(s, slot.gw, slot.gh);
++    slot.key = SizedTargetKey(slot.data, depth, slot.gw, slot.gh);
++    slot.it = targets_.find(slot.key);
++    slot.sized = slot.it != targets_.end() && slot.it->second.gw == slot.gw && slot.it->second.gh == slot.gh;
++    return slot;
++}
++
++Target* D3D11Backend::FindTarget(const Surface& s, bool depth) {
++    if (!s.header) return nullptr;
++    TargetSlot slot = FindTargetSlot(s, depth);
++    if (!slot.sized) return nullptr;
++    UpdateTargetUsed(slot.data);
++    return &slot.it->second;
++}
++
++Target* D3D11Backend::EnsureTarget(const Surface& s, bool depth) {
++    if (!s.header) return nullptr;
++    TargetSlot slot = FindTargetSlot(s, depth);
++    UpdateTargetUsed(slot.data);
++    if (slot.sized) return &slot.it->second;
++    if (slot.it != targets_.end()) ReleaseTarget(slot.it);
++    Target t;
++    t.depth = depth;
++    t.gw = slot.gw;
++    t.gh = slot.gh;
++    if (!CreateTargetResource(t)) return nullptr;
++    g_perf.targets++;
++    t.data = slot.data;
++    t.bytes = GuestPitch(slot.gw) * slot.gh;
++    if (depth) t.bytes = slot.gw * slot.gh * 4;
++    t.epoch = DirtyEpoch(slot.data);
++    t.sig = MemSig(slot.data, t.bytes);
++    auto& ref = targets_[slot.key] = std::move(t);
++    return &ref;
++}
++
++void D3D11Backend::UpdateTargetUsed(uint32_t data) {
++    for (const UsedTarget& u : recent_used_) {
++        if (u.data == data && u.frame == frame_) return;
++    }
++    target_used_[data] = frame_;
++    recent_used_[recent_used_next_++ % recent_used_.size()] = {data, frame_};
++}
++
++bool D3D11Backend::BindTargets(const State& s) {
++    Target* rt = EnsureTarget(s.rt, false);
++    Target* ds = s.rs[kRsZEnable] || s.rs[kRsStencilEnable] ? EnsureTarget(s.zs, true) : nullptr;
++    if (rt && ds && (rt->w != ds->w || rt->h != ds->h)) ds = nullptr;
++    if (!rt && !ds) return false;
++    if (rt) {
++        if (LatchCpuWrite(*rt)) UploadTarget(*rt, s.rt);
++        rt->drawn = true;
++    }
++    if (ds) ds->drawn = true;
++    if (rt != bound_rt_ || ds != bound_ds_) {
++        SetTargets(rt ? rt->rtv.Get() : nullptr, ds ? ds->dsv.Get() : nullptr);
++        bound_rt_ = rt;
++        bound_ds_ = ds;
++    }
++    return true;
++}
++
++// src's depth drawn into dst's depth buffer
++bool D3D11Backend::DepthCopy(const State& s) {
++    TextureDesc d;
++    if (!s.rt.header || !s.textures[0] || !Describe(s.textures[0], d) || Format(d.format).depth || d.cube ||
++        d.depth != 1) {
++        return false;
++    }
++    uint32_t gw;
++    uint32_t gh;
++    SurfaceSize(s.rt, gw, gh);
++    auto di = targets_.find(SizedTargetKey(mem::VirtualFromPhysical(s.rt.data), true, gw, gh));
++    auto si = targets_.find(SizedTargetKey(d.data, true, d.width, d.height));
++    if (di == targets_.end() || si == targets_.end() || di == si) return false;
++    Target& dst = di->second;
++    Target& src = si->second;
++    D3D11_DEPTH_STENCIL_DESC dd = NoDepth();
++    dd.DepthEnable = TRUE;
++    dd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
++    Pipeline* p = FullScreenPipeline(kDepthCopyKey, kDepthHlsl, "psmain", OpaqueBlend(0), dd);
++    if (!p) return false;
++    if (cap_) fprintf(cap_, "%04u depth copy %08X to %08X\n", cap_i_++, src.data, dst.data);
++    ID3D11ShaderResourceView* none[4] = {};
++    ctx_->PSSetShaderResources(0, 4, none);
++    SetTargets(nullptr, dst.dsv.Get());
++    SetFullViewport(dst.w, dst.h);
++    ID3D11ShaderResourceView* srv = src.srv.Get();
++    BindBlitSamplers();
++    DrawFullScreen(*p, nullptr, 0, &srv, 1);
++    dst.drawn = true;
++    bound_rt_ = bound_ds_ = nullptr;
++    return true;
++}
++
++std::vector<uint8_t> LatchCpuChanges(Target& t) {
++    std::vector<uint8_t> px(t.read.size(), 0);
++    uint32_t guest_pitch = GuestPitch(t.gw);
++    const uint8_t* guest = static_cast<const uint8_t*>(kernel::HostPtr(t.data));
++    for (uint32_t y = 0; y < t.gh; y++) {
++        for (uint32_t x = 0; x < t.gw; x++) {
++            const uint8_t* c = guest + size_t(y) * guest_pitch + x * 4;
++            size_t i = (size_t(y) * t.gw + x) * 4;
++            if (!std::memcmp(c, &t.read[i], 4)) continue;
++            std::memcpy(&t.read[i], c, 4);
++            std::memcpy(&px[i], c, 3);
++            px[i + 3] = 255;
++        }
++    }
++    return px;
++}
++
++D3D11Backend::PixelTexture D3D11Backend::CreatePixelTexture(const std::vector<uint8_t>& px, uint32_t pitch, uint32_t w,
++                                                            uint32_t h) {
++    PixelTexture out;
++    if (px.size() < size_t(pitch) * (h - 1) + size_t(w) * 4) return out;
++    D3D11_TEXTURE2D_DESC td{w, h, 1, 1, kBgra, {1, 0}, D3D11_USAGE_IMMUTABLE, D3D11_BIND_SHADER_RESOURCE, 0, 0};
++    D3D11_SUBRESOURCE_DATA init{px.data(), pitch, 0};
++    if (SUCCEEDED(dev_->CreateTexture2D(&td, &init, &out.tex))) dev_->CreateShaderResourceView(out.tex.Get(), nullptr, &out.srv);
++    return out;
++}
++
++// CPU pixels of a color surface into its host target, scaled
++void D3D11Backend::UploadTarget(Target& t, const Surface& s) {
++    g_perf.rtups++;
++    TextureDesc d;
++    if (!Describe(s.header, d) || Format(d.format).depth) return;
++    std::vector<uint8_t> px;
++    uint32_t pitch;
++    bool over = !t.drawn && d.width == t.gw && d.height == t.gh && t.read.size() == size_t(t.gw) * t.gh * 4;
++    if (over) {
++        LOG_FIRST(4, "d3d11: CPU pixels drawn over target %08X", t.data);
++        pitch = t.gw * 4;
++        px = LatchCpuChanges(t);
++    } else {
++        DecodeLevel(d, 0, 0, static_cast<const uint8_t*>(kernel::HostPtr(d.data)), nullptr, px, pitch);
++    }
++    PixelTexture tex = CreatePixelTexture(px, pitch, d.width, d.height);
++    if (!tex.srv) return;
++    SetBlitTarget(t.rtv.Get(), t.w, t.h);
++    float uv[4] = {0, 0, 1, 1};
++    Blit(tex.srv.Get(), uv, {.alpha = true, .over = over});
++    t.epoch = DirtyEpoch(t.data);
++    t.sig = MemSig(t.data, t.bytes);
++}
++
++TexKind TextureKind(const TextureDesc& d) {
++    if (d.cube) return kTexCube;
++    if (d.depth > 1) return kTex3D;
++    return kTex2D;
++}
++
++constexpr float kUpscaledMin = 1.01f;
++
++ID3D11ShaderResourceView* D3D11Backend::BindTargetTexture(const State& s, int stage, const TextureDesc& d, Target& t,
++                                                          bool box, DrawTextures& stages) {
++    TexInfo& info = stages.info[stage];
++    if (&t == draw_ds_) return nullptr;
++    bool feedback = &t == draw_rt_;
++    stages.rt[stage] = true;
++    info.flags |= kTexTarget;
++    if (!t.depth && LatchCpuWrite(t)) {
++        Surface su;
++        su.header = s.textures[size_t(stage)];
++        UploadTarget(t, su);
++    }
++    info.kind = kTex2D;
++    Target* rt = FindTarget(s.rt, false);
++    float k = float(t.w) / (t.gw * stages.k[stage]);
++    if (!t.depth && box && k > kUpscaledMin && rt && rt != &t && (t.gw > rt->gw || t.gh > rt->gh)) {
++        stages.wide[stage] = k;
++        info.flags |= kTexWide;
++    }
++    if (feedback) return Feedback(t);
++    if (t.depth) info.shadow = ShadowDepthKind(d.format);
++    return t.srv.Get();
++}
++
++bool SameTexture(const Tex& tx, const TextureDesc& d) {
++    return tx.res && tx.d.format == d.format && tx.d.width == d.width && tx.d.height == d.height &&
++           tx.d.depth == d.depth && tx.d.levels == d.levels && tx.d.cube == d.cube && tx.d.pitch == d.pitch;
++}
++
++// false when the texture could not be made, its entry dropped
++bool D3D11Backend::CreateTexture(Tex& tx, const TextureDesc& d, const FormatInfo& fi, uint64_t key) {
++    g_perf.newtex++;
++    tx = Tex{};
++    tx.d = d;
++    tx.fmt = HostFormat(fi.host);
++    uint32_t w = d.width;
++    uint32_t h = d.height;
++    tx.levels = d.levels;
++    if (fi.compressed && ((w & 3) || (h & 3))) {
++        w = (w + 3) & ~3u;
++        h = (h + 3) & ~3u;
++        tx.levels = 1;
++    }
++    tx.w = w;
++    tx.h = h;
++    tx.slices = d.cube ? 1 : d.depth;
++    D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
++    sv.Format = tx.fmt;
++    HRESULT hr;
++    if (d.depth > 1 && !d.cube) {
++        D3D11_TEXTURE3D_DESC td{w, h, d.depth, tx.levels, tx.fmt, D3D11_USAGE_DEFAULT, D3D11_BIND_SHADER_RESOURCE, 0, 0};
++        ComPtr<ID3D11Texture3D> t3;
++        hr = dev_->CreateTexture3D(&td, nullptr, &t3);
++        tx.res = t3;
++        sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
++        sv.Texture3D.MipLevels = tx.levels;
++    } else {
++        D3D11_TEXTURE2D_DESC td{w, h, tx.levels, d.cube ? 6u : 1u, tx.fmt, {1, 0}, D3D11_USAGE_DEFAULT,
++                                D3D11_BIND_SHADER_RESOURCE, 0, d.cube ? UINT(D3D11_RESOURCE_MISC_TEXTURECUBE) : 0u};
++        ComPtr<ID3D11Texture2D> t2;
++        hr = dev_->CreateTexture2D(&td, nullptr, &t2);
++        tx.res = t2;
++        if (d.cube) {
++            sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
++            sv.TextureCube.MipLevels = tx.levels;
++        } else {
++            sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
++            sv.Texture2D.MipLevels = tx.levels;
++        }
++    }
++    if (FAILED(hr) || FAILED(dev_->CreateShaderResourceView(tx.res.Get(), &sv, &tx.srv))) {
++        textures_.erase(key);
++        return false;
++    }
++    return true;
++}
++
++// a decoded level into its subresource: rows padded to the level's size, as d3d12.cpp's CopyLevelRows
++void D3D11Backend::UploadTextureLevel(Tex& tx, uint32_t f, uint32_t l, const std::vector<uint8_t>& px, uint32_t pitch) {
++    Blocks b = FormatBlocks(tx.fmt);
++    uint32_t w = std::max(1u, tx.w >> l);
++    uint32_t h = std::max(1u, tx.h >> l);
++    uint32_t slices = std::max(1u, tx.slices >> l);
++    uint32_t rows = (h + b.side - 1) / b.side;
++    uint32_t row_size = (w + b.side - 1) / b.side * b.bytes;
++    std::vector<uint8_t> buf(size_t(row_size) * rows * slices, 0);
++    size_t src_rows = pitch ? px.size() / pitch / slices : 0;
++    for (uint32_t z = 0; z < slices; z++) {
++        for (uint32_t y = 0; y < rows && y < src_rows; y++) {
++            std::memcpy(&buf[(size_t(z) * rows + y) * row_size], &px[(size_t(z) * src_rows + y) * pitch],
++                        std::min<size_t>(pitch, row_size));
++        }
++    }
++    ctx_->UpdateSubresource(tx.res.Get(), D3D11CalcSubresource(l, f, tx.levels), nullptr, buf.data(), row_size,
++                            row_size * rows);
++}
++
++void D3D11Backend::UploadTexture(Tex& tx, const TextureDesc& d, const FormatInfo& fi, const uint8_t* p,
++                                 const uint32_t* colours) {
++    (void)fi;
++    uint32_t faces = d.cube ? 6 : 1;
++    std::vector<uint8_t> px;
++    for (uint32_t f = 0; f < faces; f++) {
++        for (uint32_t l = 0; l < tx.levels; l++) {
++            uint32_t pitch;
++            DecodeLevel(d, l, f, p, colours, px, pitch);
++            UploadTextureLevel(tx, f, l, px, pitch);
++        }
++    }
++}
++
++struct StagePalette {
++    uint32_t colours[256] = {};
++    uint32_t va = 0;
++    uint64_t hash = 0;
++};
++
++void ReadStagePalette(const State& s, int stage, const TextureDesc& d, StagePalette& palette) {
++    constexpr uint32_t kFmtP8 = 0x0B;
++    constexpr uint32_t kPaletteCommon = 0;
++    constexpr uint32_t kPaletteData = 4;
++    constexpr uint32_t kPaletteSizeShift = 30;
++    if (d.format != kFmtP8 || !s.palettes[size_t(stage)]) return;
++    uint32_t header = s.palettes[size_t(stage)];
++    palette.va = mem::VirtualFromPhysical(kernel::R32(header + kPaletteData));
++    uint32_t size_code = kernel::R32(header + kPaletteCommon) >> kPaletteSizeShift;
++    size_t bytes = (std::size(palette.colours) >> size_code) * sizeof(uint32_t);
++    std::memcpy(palette.colours, kernel::HostPtr(palette.va), bytes);
++    palette.hash = Hash(palette.colours, sizeof(palette.colours));
++}
++
++ID3D11ShaderResourceView* D3D11Backend::BindGuestTexture(const State& s, int stage, const TextureDesc& d,
++                                                         const FormatInfo& fi, DrawTextures& stages) {
++    TexInfo& info = stages.info[stage];
++    StagePalette palette;
++    ReadStagePalette(s, stage, d, palette);
++    const uint64_t key = uint64_t(palette.va) << 32 | d.data;
++    const uint32_t* colours = palette.va ? palette.colours : nullptr;
++    Tex& tx = textures_[key];
++    uint32_t total = TotalSize(d);
++    bool same = SameTexture(tx, d);
++    if (!same && !CreateTexture(tx, d, fi, key)) return nullptr;
++    if (tx.frame != presents_ + 1 || !same || tx.palette != palette.hash) {
++        tx.frame = presents_ + 1;
++        tx.palette = palette.hash;
++        const uint8_t* p = static_cast<const uint8_t*>(kernel::HostPtr(d.data));
++        auto perf_t = PerfClock::now();
++        uint64_t sig = MemSig(d.data, total) ^ DirtyEpoch(d.data) ^ palette.hash;
++        g_perf.sig += PerfMs(perf_t);
++        if (sig != tx.sig || !same) {
++            PerfScope perf_up{g_perf.texup};
++            g_perf.texups++;
++            g_perf.texup_bytes += total;
++            tx.sig = sig;
++            UploadTexture(tx, d, fi, p, colours);
++            tx.pack_gen = 0;
++        }
++    }
++    if (tx.pack_gen != texturedumper::Generation()) LatchPackKey(tx, d, fi, colours);
++    if (tx.pack_key) LatchPackImage(tx);
++    const Tex& drawn = tx.swap ? *tx.swap : tx;
++    stages.levels[stage] = drawn.levels;
++    if (fi.depth) info.shadow = ShadowDepthKind(d.format);
++    return drawn.srv.Get();
++}
++
++void D3D11Backend::LatchPackKey(Tex& tx, const TextureDesc& d, const FormatInfo& fi, const uint32_t* colours) {
++    const uint8_t* p = static_cast<const uint8_t*>(kernel::HostPtr(d.data));
++    tx.pack_gen = texturedumper::Generation();
++    tx.swap = nullptr;
++    uint64_t key = texturedumper::Key(d, fi, p, colours);
++    texturedumper::Dump(key, d, p, colours);
++    tx.pack_key = texturedumper::Replacing() ? key : 0;
++}
++
++void D3D11Backend::LatchPackImage(Tex& tx) {
++    auto it = pack_textures_.find(tx.pack_key);
++    if (it == pack_textures_.end()) {
++        texturedumper::Image img;
++        texturedumper::Lookup got = texturedumper::Take(tx.pack_key, img);
++        if (got == texturedumper::Lookup::Loading) return;
++        if (got == texturedumper::Lookup::None) {
++            tx.pack_key = 0;
++            return;
++        }
++        it = pack_textures_.emplace(tx.pack_key, Tex{}).first;
++        CreatePackTexture(it->second, img);
++    }
++    if (it->second.res) tx.swap = &it->second;
++    tx.pack_key = 0;
++}
++
++void D3D11Backend::CreatePackTexture(Tex& r, const texturedumper::Image& img) {
++    r.fmt = img.format;
++    r.levels = uint32_t(img.levels.size());
++    r.w = img.width;
++    r.h = img.height;
++    D3D11_TEXTURE2D_DESC td{img.width, img.height, r.levels, 1, r.fmt, {1, 0}, D3D11_USAGE_DEFAULT,
++                            D3D11_BIND_SHADER_RESOURCE, 0, 0};
++    ComPtr<ID3D11Texture2D> t2;
++    if (FAILED(dev_->CreateTexture2D(&td, nullptr, &t2)) || FAILED(dev_->CreateShaderResourceView(t2.Get(), nullptr, &r.srv))) {
++        LOGE("texture pack: a %ux%u image could not be made", img.width, img.height);
++        r.srv.Reset();
++        return;
++    }
++    r.res = t2;
++    for (uint32_t l = 0; l < r.levels; l++) UploadTextureLevel(r, 0, l, img.levels[l].px, img.levels[l].pitch);
++}
++
++ID3D11ShaderResourceView* D3D11Backend::BindTexture(const State& s, int stage, DrawTextures& stages) {
++    TexInfo& info = stages.info[stage];
++    info = {};
++    stages.rt[stage] = false;
++    stages.k[stage] = 1;
++    stages.wide[stage] = 0;
++    stages.levels[stage] = 1;
++    TextureDesc d;
++    if (!s.textures[size_t(stage)] || !Describe(s.textures[size_t(stage)], d)) return nullptr;
++    const FormatInfo& fi = Format(d.format);
++    info.kind = TextureKind(d);
++    info.rect = d.linear;
++    auto tit = targets_.find(SizedTargetKey(d.data, fi.depth, d.width, d.height));
++    if (tit != targets_.end() && !d.cube && d.depth == 1 && !fi.compressed) {
++        return BindTargetTexture(s, stage, d, tit->second, true, stages);
++    }
++    return BindGuestTexture(s, stage, d, fi, stages);
++}
++
++constexpr uint32_t kTexfLinear = 2;
++constexpr uint32_t kTexfAnisotropic = 3;
++constexpr uint32_t kTaddressWrap = 1;
++constexpr uint32_t kTaddressClamp = 3;
++
++D3D11_SAMPLER_DESC StageSampler(const State& s, int i, const DrawTextures& stages, bool clamp, uint32_t aniso) {
++    D3D11_SAMPLER_DESC sd = {};
++    const auto& t = s.tss[size_t(i)];
++    uint32_t mag = t[kTssMagFilter];
++    uint32_t min = t[kTssMinFilter];
++    uint32_t mip = t[kTssMipFilter];
++    auto lin = [](uint32_t f) { return f >= kTexfLinear; };
++    // D3D11_ENCODE_BASIC_FILTER: min at bit 4, mag at 2, mip at 0, 1 for linear
++    uint32_t fmin = lin(min) ? 1 : 0;
++    uint32_t fmag = lin(mag) ? 1 : 0;
++    uint32_t fmip = mip == kTexfLinear ? 1 : 0;
++    sd.Filter = D3D11_FILTER(fmin << 4 | fmag << 2 | fmip);
++    sd.MaxAnisotropy = 1;
++    bool anisotropic = min == kTexfAnisotropic || mag == kTexfAnisotropic;
++    uint32_t an = anisotropic ? std::max<uint32_t>(t[kTssMaxAnisotropy], 1) : 1;
++    if (aniso && lin(min) && mip && stages.levels[i] > 1 && !stages.info[i].shadow) an = aniso;
++    if (an > 1) {
++        sd.Filter = D3D11_FILTER_ANISOTROPIC;
++        sd.MaxAnisotropy = std::min<uint32_t>(an, 16);
++    }
++    sd.AddressU = Address(clamp && t[kTssAddressU] == kTaddressWrap ? kTaddressClamp : t[kTssAddressU]);
++    sd.AddressV = Address(clamp && t[kTssAddressV] == kTaddressWrap ? kTaddressClamp : t[kTssAddressV]);
++    sd.AddressW = Address(t[kTssAddressW]);
++    sd.MipLODBias = std::clamp(Bits(t[kTssMipLodBias]), -16.0f, 15.99f);
++    if (!std::isfinite(sd.MipLODBias)) sd.MipLODBias = 0;
++    sd.MinLOD = float(t[kTssMaxMipLevel]);
++    sd.MaxLOD = mip ? D3D11_FLOAT32_MAX : sd.MinLOD;
++    sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
++    Color(t[kTssBorderColor], sd.BorderColor);
++    if (stages.info[i].shadow) {
++        sd.Filter = lin(min) || lin(mag) ? D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT
++                                         : D3D11_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
++        sd.ComparisonFunc = Cmp(s.rs[kRsShadowFunc]);
++        sd.MaxAnisotropy = 1;
++    }
++    return sd;
++}
++
++uint32_t SimpleState(const State& s, uint32_t method) { return s.simple[method >> 2]; }
++
++constexpr uint32_t kQuadVertices = 6;
++
++DrawShaders ClassifyShaders(const State& s, const Assembled& a, uint32_t count) {
++    DrawShaders sh;
++    sh.prog = (s.vs_handle & 1) && s.vs && !s.vs->program.empty();
++    bool points = a.topology == Topology::Points;
++    sh.quad = count <= kQuadVertices && !s.rs[kRsZEnable] && !points;
++    sh.fixed_transform = !sh.prog && !a.pretransformed;
++    if (!sh.prog) sh.fk = MakeFixedKey(s);
++    return sh;
++}
++
++void EnsureProgramHash(const State& s) {
++    if (!s.vs->hash) s.vs->hash = Hash(s.vs->program.data(), s.vs->program.size() * 4) | 1;
++}
++
++constexpr uint64_t kDeclarationSalt = 0x10000;
++constexpr uint64_t kPretransformedSalt = 0x5A5A;
++constexpr uint64_t kQuadSalt = 0xC3C30000;
++
++uint64_t VertexKey(const State& s, const Assembled& a, const DrawShaders& sh) {
++    uint64_t seed = sh.prog ? s.vs->hash ^ a.regs : Hash(&s.vs_handle, 4, a.regs | kDeclarationSalt);
++    uint64_t vkey = Hash(&a.decode, 8, seed);
++    if (!sh.prog && a.pretransformed) vkey ^= kPretransformedSalt;
++    if (sh.quad) vkey ^= kQuadSalt;
++    if (!sh.prog) vkey = Hash(&sh.fk, sizeof(sh.fk), vkey);
++    return vkey;
++}
++
++std::string VertexHlsl(const State& s, const Assembled& a, const DrawShaders& sh) {
++    if (sh.prog) return VertexProgramHlsl(s.vs->program, a.regs, a.decode);
++    return FixedVertexHlsl(a.regs, a.pretransformed, a.decode, sh.fk);
++}
++
++void D3D11Backend::EnsureVertexShader(const State& s, const Assembled& a, DrawShaders& sh) {
++    auto vit = shader_src_.find(sh.vkey);
++    if (vit != shader_src_.end()) {
++        sh.vs_code = blobs_[vit->second].Get();
++        sh.vh = vit->second;
++        return;
++    }
++    std::string src = ReversedDepthHlsl(VertexHlsl(s, a, sh));
++    sh.vs_code = Compile(sh.quad ? QuadHlsl(std::move(src)) : src, "main", "vs", sh.vh);
++    shader_src_[sh.vkey] = sh.vh;
++}
++
++bool D3D11Backend::BindStageTexturesAndTargets(const State& s, DrawTextures& stages) {
++    draw_rt_ = bound_rt_;
++    draw_ds_ = bound_ds_;
++    {
++        PerfScope perf_bind{g_perf.bind};
++        for (int i = 0; i < 4; i++) stages.srv[i] = BindTexture(s, i, stages);
++    }
++    // textures may have drawn copies that unbound the targets
++    if (bound_rt_ != draw_rt_ || bound_ds_ != draw_ds_) return BindTargets(s);
++    return true;
++}
++
++constexpr uint64_t kPixelKeySalt = 0x9E3779B97F4A7C15ull;
++
++void D3D11Backend::EnsurePixelShader(const PixelKey& pk, DrawShaders& sh) {
++    auto pit = shader_src_.find(sh.pkey ^ kPixelKeySalt);
++    if (pit != shader_src_.end()) {
++        sh.ps_code = blobs_[pit->second].Get();
++        sh.ph = pit->second;
++        return;
++    }
++    sh.ps_code = Compile(PixelHlsl(pk), "main", "ps", sh.ph);
++    shader_src_[sh.pkey ^ kPixelKeySalt] = sh.ph;
++}
++
++void KeyBlend(const State& s, PsoKey& k) {
++    k.blend = SimpleState(s, kMBlendEnable) != 0;
++    if (k.blend) {
++        k.src = SimpleState(s, kMSrcBlend);
++        k.dst = SimpleState(s, kMDestBlend);
++        k.op = SimpleState(s, kMBlendOp);
++    }
++    uint32_t cw = SimpleState(s, kMColorWriteEnable);
++    k.wmask = ((cw >> 16) & 1) | ((cw >> 8) & 1) << 1 | (cw & 1) << 2 | ((cw >> 24) & 1) << 3;
++}
++
++constexpr uint32_t kZUseW = 2;
++
++bool OffsetsPolygons(const State& s, Topology topology) {
++    return topology == Topology::Triangles && SimpleState(s, kMSolidOffsetEnable);
++}
++
++float HostSlopeScale(const State& s, const Target* ds) {
++    return Bits(SimpleState(s, kMSlopeScale)) * (ds ? float(ds->w) / ds->gw : 1.0f);
++}
++
++void D3D11Backend::KeyDepthStencil(const State& s, const Assembled& a, PsoKey& k) {
++    k.zen = s.rs[kRsZEnable] != 0;
++    if (k.zen) {
++        k.zwrite = SimpleState(s, kMZWriteEnable) != 0;
++        k.zfunc = SimpleState(s, kMZFunc);
++    }
++    k.sten = s.rs[kRsStencilEnable] != 0;
++    if (k.sten) {
++        k.sfunc = SimpleState(s, kMStencilFunc);
++        k.smask = SimpleState(s, kMStencilMask) & 0xFF;
++        k.swmask = SimpleState(s, kMStencilWriteMask) & 0xFF;
++        k.sfail = s.rs[kRsStencilFail];
++        k.szfail = SimpleState(s, kMStencilZFail);
++        k.spass = SimpleState(s, kMStencilPass);
++    }
++    if (OffsetsPolygons(s, a.topology)) k.zslope = -HostSlopeScale(s, bound_ds_);
++}
++
++constexpr uint32_t kFillWireframe = 0x1B01;
++constexpr uint32_t kCullCw = 0x900;
++
++void KeyRasterizer(const State& s, const Assembled& a, PsoKey& k) {
++    uint32_t cull = s.rs[kRsCullMode];
++    k.cull = cull != 0 && a.topology == Topology::Triangles;
++    k.ccw = cull == kCullCw;
++    k.fill = s.rs[kRsFillMode];
++}
++
++void D3D11Backend::BuildPipelineKey(const State& s, const Assembled& a, uint64_t vh, uint64_t ph, PsoKey& k) {
++    std::memset(&k, 0, sizeof(k));
++    k.vs = vh;
++    k.ps = ph;
++    k.regs = a.regs;
++    for (int r = 0; r < 16; r++) {
++        if ((a.regs >> r) & 1) {
++            const VertexElement& e = a.elements[size_t(r)];
++            k.elements[r] = e.format | uint32_t(e.buffer) << 8 | uint32_t(e.offset) << 16;
++        }
++    }
++    k.topo = uint32_t(a.topology);
++    k.has_rt = bound_rt_ != nullptr;
++    k.has_ds = bound_ds_ != nullptr;
++    k.rtfmt = bound_rt_ ? bound_rt_->fmt : 0;
++    KeyBlend(s, k);
++    if (k.has_ds) KeyDepthStencil(s, a, k);
++    KeyRasterizer(s, a, k);
++}
++
++D3D11_COMPARISON_FUNC ReversedCmp(uint32_t v) {
++    static const uint8_t mirror[8] = {0, 4, 2, 6, 1, 5, 3, 7};
++    return D3D11_COMPARISON_FUNC(mirror[Cmp(v) - 1] + 1);
++}
++
++Pipeline* D3D11Backend::EnsurePipeline(const PsoKey& k, const DrawShaders& sh) {
++    uint64_t h = Hash(&k, sizeof(k));
++    auto it = pipes_.find(h);
++    if (it != pipes_.end()) return it->second.vs ? &it->second : nullptr;
++    Pipeline& p = pipes_[h];
++    g_perf.psos++;
++    D3D11_INPUT_ELEMENT_DESC el[16];
++    uint32_t n = 0;
++    for (uint32_t r = 0; r < 16; r++) {
++        if (!((k.regs >> r) & 1)) continue;
++        uint32_t e = k.elements[r];
++        el[n++] = {"ATTR", r, DXGI_FORMAT(e & 0xFF), (e >> 8) & 0xFF, e >> 16, D3D11_INPUT_PER_VERTEX_DATA, 0};
++    }
++    if (n && FAILED(dev_->CreateInputLayout(el, n, sh.vs_code->GetBufferPointer(), sh.vs_code->GetBufferSize(), &p.il))) {
++        LOGE("d3d11: input layout creation failed");
++        p = {};
++        return nullptr;
++    }
++    D3D11_BLEND_DESC bd = OpaqueBlend(uint8_t(k.wmask));
++    auto& b = bd.RenderTarget[0];
++    b.BlendEnable = k.blend;
++    b.SrcBlend = Blend(k.src, false);
++    b.DestBlend = Blend(k.dst, false);
++    b.BlendOp = BlendOp(k.op);
++    b.SrcBlendAlpha = Blend(k.src, true);
++    b.DestBlendAlpha = Blend(k.dst, true);
++    b.BlendOpAlpha = BlendOp(k.op);
++    D3D11_RASTERIZER_DESC rd{};
++    rd.FillMode = k.fill == kFillWireframe ? D3D11_FILL_WIREFRAME : D3D11_FILL_SOLID;
++    rd.CullMode = k.cull ? D3D11_CULL_BACK : D3D11_CULL_NONE;
++    rd.FrontCounterClockwise = k.ccw;
++    rd.DepthBias = k.zbias;
++    rd.SlopeScaledDepthBias = k.zslope;
++    rd.DepthClipEnable = TRUE;
++    rd.ScissorEnable = TRUE;
++    D3D11_DEPTH_STENCIL_DESC ds = NoDepth();
++    if (k.has_ds) {
++        ds.DepthEnable = k.zen;
++        ds.DepthWriteMask = k.zwrite ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
++        ds.DepthFunc = ReversedCmp(k.zfunc);
++        ds.StencilEnable = k.sten;
++        ds.StencilReadMask = UINT8(k.smask);
++        ds.StencilWriteMask = UINT8(k.swmask);
++        D3D11_DEPTH_STENCILOP_DESC so{StencilOp(k.sfail), StencilOp(k.szfail), StencilOp(k.spass), Cmp(k.sfunc)};
++        ds.FrontFace = ds.BackFace = so;
++    }
++    // a point is drawn as its whole console pixel by a geometry shader, solid, front facing and never culled
++    if (k.topo == uint32_t(Topology::Points)) {
++        uint64_t gh;
++        ID3DBlob* gs = Compile(PointHlsl(), "main", "gs", gh);
++        if (gs) {
++            p.gs = GeometryShader(gh, gs);
++            rd.FillMode = D3D11_FILL_SOLID;
++            rd.CullMode = D3D11_CULL_NONE;
++            rd.FrontCounterClockwise = FALSE;
++        }
++    }
++    p.vs = VertexShader(sh.vh, sh.vs_code);
++    p.ps = PixelShader(sh.ph, sh.ps_code);
++    bool made = p.vs && p.ps && SUCCEEDED(dev_->CreateBlendState(&bd, &p.bs)) &&
++                SUCCEEDED(dev_->CreateRasterizerState(&rd, &p.rs)) &&
++                SUCCEEDED(dev_->CreateDepthStencilState(&ds, &p.dss));
++    if (!made) {
++        LOGE("d3d11: pipeline creation failed");
++        p = {};
++        return nullptr;
++    }
++    return &p;
++}
++
++float D3D11Backend::TargetScale() const {
++    const Target* t = bound_rt_ ? bound_rt_ : bound_ds_;
++    if (!t || !t->gw) return 1;
++    return float(t->w) / float(t->gw);
++}
++
++float D3D11Backend::RenderTargetShift(const State& s, const DrawShaders& sh) const {
++    bool offset = !sh.prog || ReadsViewportOffset(s.vs->program);
++    return offset ? -0.5f * TargetScale() : 0.0f;
++}
++
++constexpr float kAlphaTestAlways = float(D3D11_COMPARISON_ALWAYS - 1);
++constexpr uint32_t kFogTableNone = 0;
++constexpr float kFogTableLinear = 3.0f;
++
++void FillFogConstants(const State& s, bool vertex_program, DrawConstants& c) {
++    if (!s.rs[kRsFogEnable]) return;
++    if (vertex_program && s.rs[kRsFogTableMode] == kFogTableNone) {
++        c.fog[0] = 1.0f;
++        c.fog[1] = 0.0f;
++        c.fog[2] = 0.0f;
++        c.fog[3] = kFogTableLinear;
++        return;
++    }
++    c.fog[0] = Bits(s.rs[kRsFogStart]);
++    c.fog[1] = Bits(s.rs[kRsFogEnd]);
++    c.fog[2] = Bits(s.rs[kRsFogDensity]);
++    c.fog[3] = float(s.rs[kRsFogTableMode]);
++}
++
++void FillSurfaceConstants(const State& s, GuestExtent size, DrawConstants& c) {
++    c.surf[0] = float(size.w);
++    c.surf[1] = float(size.h);
++    c.surf[2] = 1.0f / s.zscale;
++    Color(s.rs[kRsFogColor], c.fog_color);
++    c.misc[0] = float(SimpleState(s, kMAlphaRef) & 0xFF);
++    c.misc[1] = SimpleState(s, kMAlphaTestEnable) ? float(Cmp(SimpleState(s, kMAlphaFunc)) - 1) : kAlphaTestAlways;
++    c.misc[2] = float(Cmp(s.rs[kRsShadowFunc]) - 1);
++    c.misc[3] = s.rs[kRsSpecularEnable] ? 1.0f : 0.0f;
++}
++
++void FillCombinerConstants(const State& s, DrawConstants& c) {
++    for (int i = 0; i < 8; i++) {
++        Color(SimpleState(s, kMPsConstant0 + i * 4), c.pc[i * 2]);
++        Color(SimpleState(s, kMPsConstant1 + i * 4), c.pc[i * 2 + 1]);
++    }
++    Color(SimpleState(s, kMPsFinalConstant0), c.pc[16]);
++    Color(SimpleState(s, kMPsFinalConstant1), c.pc[17]);
++    Color(s.rs[kRsTextureFactor], c.tfactor);
++}
++
++constexpr float kGlowBoxTexels = 3.0f;
++
++void D3D11Backend::FillTexelConstants(int i, const TextureDesc& d, const DrawTextures& stages, DrawConstants& c) {
++    c.texsize[i][0] = float(d.width);
++    c.texsize[i][1] = float(d.height);
++    if (!stages.rt[i]) return;
++    float k = stages.k[i];
++    if (stages.wide[i] > 0) {
++        float n = std::ceil(kGlowBoxTexels * stages.wide[i] * 0.5f);
++        c.spread[i][0] = kGlowBoxTexels / (n * float(d.width) * k);
++        c.spread[i][1] = kGlowBoxTexels / (n * float(d.height) * k);
++        c.spread[i][2] = n;
++    }
++}
++
++void D3D11Backend::FillTextureConstants(const State& s, const DrawShaders& sh, const DrawTextures& stages,
++                                        DrawConstants& c) {
++    for (int i = 0; i < 4; i++) {
++        TextureDesc d;
++        if (s.textures[size_t(i)] && Describe(s.textures[size_t(i)], d)) FillTexelConstants(i, d, stages, c);
++        if (stages.rt[i]) c.rtshift[i] = RenderTargetShift(s, sh);
++        const auto& t = s.tss[size_t(i)];
++        c.bump[i][0] = Bits(t[kTssBumpEnvMat00]);
++        c.bump[i][1] = Bits(t[kTssBumpEnvMat01]);
++        c.bump[i][2] = Bits(t[kTssBumpEnvMat10]);
++        c.bump[i][3] = Bits(t[kTssBumpEnvMat11]);
++        c.bumpl[i][0] = Bits(t[kTssBumpEnvLScale]);
++        c.bumpl[i][1] = Bits(t[kTssBumpEnvLOffset]);
++    }
++}
++
++void MatMul(const float* x, const float* y, float* o) {
++    for (int r = 0; r < 4; r++) {
++        for (int col = 0; col < 4; col++) {
++            o[r * 4 + col] = x[r * 4] * y[col] + x[r * 4 + 1] * y[4 + col] + x[r * 4 + 2] * y[8 + col] +
++                             x[r * 4 + 3] * y[12 + col];
++        }
++    }
++}
++
++void Transpose(const float* m, float* o) {
++    for (int r = 0; r < 4; r++) {
++        for (int col = 0; col < 4; col++) o[col * 4 + r] = m[r * 4 + col];
++    }
++}
++
++void InverseTranspose3x3(const float* wv, float* n) {
++    float det = wv[0] * (wv[5] * wv[10] - wv[6] * wv[9]) - wv[1] * (wv[4] * wv[10] - wv[6] * wv[8]) +
++                wv[2] * (wv[4] * wv[9] - wv[5] * wv[8]);
++    float id = det != 0 ? 1.0f / det : 0.0f;
++    for (int r = 0; r < 3; r++) {
++        for (int col = 0; col < 3; col++) {
++            int r1 = (r + 1) % 3;
++            int r2 = (r + 2) % 3;
++            int c1 = (col + 1) % 3;
++            int c2 = (col + 2) % 3;
++            n[r * 4 + col] = (wv[r1 * 4 + c1] * wv[r2 * 4 + c2] - wv[r1 * 4 + c2] * wv[r2 * 4 + c1]) * id;
++        }
++    }
++}
++
++constexpr size_t kTsView = 2;
++constexpr size_t kTsProjection = 3;
++constexpr size_t kTsTexture0 = 16;
++constexpr size_t kTsWorld = 256;
++
++void FillTransformConstants(const State& s, GuestExtent size, DrawConstants& c) {
++    uint32_t gw = size.w;
++    uint32_t gh = size.h;
++    float wv[16];
++    float wvp[16];
++    MatMul(s.transforms[kTsWorld].data(), s.transforms[kTsView].data(), wv);
++    MatMul(wv, s.transforms[kTsProjection].data(), wvp);
++    const auto& v = s.viewport;
++    float sx = float(v.w) / gw;
++    float sy = float(v.h) / gh;
++    float ox = (2.0f * v.x + v.w) / gw - 1;
++    float oy = 1 - (2.0f * v.y + v.h) / gh;
++    float vpm[16] = {sx, 0, 0, 0, 0, sy, 0, 0, 0, 0, v.max_z - v.min_z, 0, ox, oy, v.min_z, 1};
++    float full[16];
++    MatMul(wvp, vpm, full);
++    Transpose(full, c.wvp);
++    Transpose(wv, c.wv);
++    float n[16] = {};
++    InverseTranspose3x3(wv, n);
++    Transpose(n, c.wvn);
++    for (int t = 0; t < 4; t++) Transpose(s.transforms[kTsTexture0 + size_t(t)].data(), c.tm[t]);
++}
++
++constexpr int kLightFloats = 26;
++constexpr int kLightDiffuse = 1;
++constexpr int kLightSpecular = 5;
++constexpr int kLightAmbient = 9;
++constexpr int kLightPosition = 13;
++constexpr int kLightDirection = 16;
++constexpr int kLightRange = 19;
++constexpr int kLightFalloff = 20;
++constexpr int kLightAttenuation0 = 21;
++constexpr int kLightAttenuation1 = 22;
++constexpr int kLightAttenuation2 = 23;
++constexpr int kLightTheta = 24;
++constexpr int kLightPhi = 25;
++
++void LightToView(const std::array<uint32_t, kLightFloats>& l, const float* vm, float (&o)[7][4]) {
++    float f[kLightFloats];
++    std::memcpy(f, l.data(), sizeof(f));
++    for (int j = 0; j < 4; j++) {
++        o[0][j] = f[kLightDiffuse + j];
++        o[1][j] = f[kLightSpecular + j];
++        o[2][j] = f[kLightAmbient + j];
++    }
++    const float* pos = f + kLightPosition;
++    const float* dir = f + kLightDirection;
++    for (int j = 0; j < 3; j++) {
++        o[3][j] = pos[0] * vm[j] + pos[1] * vm[4 + j] + pos[2] * vm[8 + j] + vm[12 + j];
++        o[4][j] = dir[0] * vm[j] + dir[1] * vm[4 + j] + dir[2] * vm[8 + j];
++    }
++    o[3][3] = f[kLightRange];
++    o[4][3] = f[kLightFalloff];
++    o[5][0] = f[kLightAttenuation0];
++    o[5][1] = f[kLightAttenuation1];
++    o[5][2] = f[kLightAttenuation2];
++    o[6][0] = std::cos(f[kLightTheta] * 0.5f);
++    o[6][1] = std::cos(f[kLightPhi] * 0.5f);
++}
++
++void FillLightConstants(const State& s, const FixedKey& fk, DrawConstants& c) {
++    std::memcpy(c.mat, s.material.data(), sizeof(float) * 16);
++    c.mat[4][0] = s.material[16];
++    Color(s.rs[kRsAmbient], c.amb);
++    const float* vm = s.transforms[kTsView].data();
++    for (int i = 0; i < 8; i++) {
++        if (!((fk.types >> (i * 2)) & 3)) continue;
++        LightToView(s.lights[size_t(i)], vm, c.lt[i]);
++    }
++}
++
++struct WRange {
++    float near_w;
++    float far_w;
++};
++
++WRange ProjectionWRange(const float* m) {
++    float m33 = m[10];
++    float m34 = m[11];
++    float m43 = m[14];
++    float m44 = m[15];
++    if (m33 == m34 || m33 == 0) return {0, 1};
++    return {m44 - m43 / m33 * m34, (m44 - m43) / (m33 - m34) * m34 + m44};
++}
++
++constexpr uint32_t kMClipMin = 0x394;
++constexpr uint32_t kMClipMax = 0x398;
++constexpr float kFallbackNear = 1.0f / 65536;
++
++WRange DrawWRange(const State& s, bool program) {
++    WRange r{0, s.zscale};
++    if (!program) {
++        r = ProjectionWRange(s.transforms[kTsProjection].data());
++    } else if (SimpleState(s, kMClipMax)) {
++        r.near_w = Bits(SimpleState(s, kMClipMin));
++    }
++    if (r.near_w <= 0 || r.near_w >= r.far_w) r.near_w = r.far_w * kFallbackNear;
++    return r;
++}
++
++void D3D11Backend::FillDepthConstants(const State& s, const DrawShaders& sh, const PsoKey& k, DrawConstants& c) const {
++    bool offset = OffsetsPolygons(s, Topology(k.topo));
++    float units = offset ? Bits(SimpleState(s, kMDepthOffset)) : 0;
++    if (s.rs[kRsZEnable] != kZUseW) {
++        c.zparams[2] = units / s.zscale;
++        return;
++    }
++    WRange r = DrawWRange(s, sh.prog);
++    c.zparams[0] = r.near_w / (r.far_w - r.near_w);
++    c.zparams[1] = r.far_w;
++    c.zparams[2] = sh.prog ? units : units * r.far_w / s.zscale;
++}
++
++void D3D11Backend::UploadConstants(const State& s, const DrawShaders& sh, const PsoKey& k, const DrawTextures& stages,
++                                   GuestExtent size, DrawConstants& c) {
++    if (!vsc_set_ || std::memcmp(last_vsc_.data(), s.vsc.data(), sizeof(s.vsc))) {
++        WriteConstants(cb_vsc_.Get(), s.vsc.data(), sizeof(s.vsc));
++        std::memcpy(last_vsc_.data(), s.vsc.data(), sizeof(s.vsc));
++        vsc_set_ = true;
++    }
++    FillSurfaceConstants(s, size, c);
++    if (k.topo == uint32_t(Topology::Points)) c.surf[3] = TargetScale();
++    FillFogConstants(s, sh.prog, c);
++    FillCombinerConstants(s, c);
++    FillDepthConstants(s, sh, k, c);
++    FillTextureConstants(s, sh, stages, c);
++    if (sh.fixed_transform) {
++        FillTransformConstants(s, size, c);
++        FillLightConstants(s, sh.fk, c);
++    }
++    if (!dc_set_ || std::memcmp(&last_dc_, &c, sizeof(c))) {
++        WriteConstants(cb_dc_.Get(), &c, sizeof(c));
++        last_dc_ = c;
++        dc_set_ = true;
++    }
++    if (!binds_.constants) {
++        ID3D11Buffer* cbs[2] = {cb_vsc_.Get(), cb_dc_.Get()};
++        ctx_->VSSetConstantBuffers(0, 2, cbs);
++        ctx_->GSSetConstantBuffers(0, 2, cbs);
++        ctx_->PSSetConstantBuffers(0, 2, cbs);
++        binds_.constants = true;
++    }
++}
++
++void D3D11Backend::CaptureDraw(const State& s, uint32_t prim, uint32_t count, const PsoKey& k, const DrawConstants& c,
++                               const DrawTextures& stages) {
++    fprintf(cap_,
++            "%04u draw rt %08X ds %08X prim %u count %u vs %08X ps %08X blend %u %X %X zen %u %X zwrite %u "
++            "zbias %d %.2f cull %u cw %X c0 %.3f %.3f %.3f %.3f",
++            cap_i_++, s.rt.data, bound_ds_ ? s.zs.data : 0, prim, count, s.vs_handle, s.ps ? s.ps->handle : 0, k.blend,
++            k.src, k.dst, k.zen, k.zfunc, k.zwrite, k.zbias, k.zslope, k.cull, k.wmask, c.pc[0][0], c.pc[0][1],
++            c.pc[0][2], c.pc[0][3]);
++    for (int i = 0; i < 4; i++) {
++        TextureDesc d;
++        if (!s.textures[size_t(i)] || !Describe(s.textures[size_t(i)], d)) continue;
++        bool tg = targets_.count(SizedTargetKey(d.data, Format(d.format).depth, d.width, d.height));
++        fprintf(cap_, " | t%d %08X fmt %X %ux%u%s%s", i, d.data, d.format, d.width, d.height, tg ? " target" : "",
++                stages.srv[i] ? "" : " unbound");
++        if (stages.srv[i] && !tg && stages.info[i].kind == kTex2D && cap_seen_.insert(d.data).second) {
++            cap_tex_.push_back({stages.srv[i], d.data, d.width, d.height});
++        }
++    }
++}
++
++constexpr int kVsConstants = 192;
++constexpr int kVsConstantBias = 96;
++
++void D3D11Backend::CaptureInputs(const State& s, const Assembled& a, const DrawConstants& c) {
++    fprintf(cap_, "\n     verts");
++    uint32_t n = 0;
++    for (int r = 0; r < 16; r++) n += (a.regs >> r) & 1;
++    for (size_t v = 0; v < std::min<size_t>(4, n ? a.vertices.size() / (n * 4) : 0); v++) {
++        fprintf(cap_, " [");
++        for (uint32_t k = 0; k < n * 4; k++) fprintf(cap_, " %g", a.vertices[v * n * 4 + k]);
++        fprintf(cap_, " ]");
++    }
++    for (int r = 0; r < kVsConstants; r++) {
++        const auto& v = s.vsc[r];
++        if (v[0] || v[1] || v[2] || v[3]) fprintf(cap_, "\n     c%d %g %g %g %g", r - kVsConstantBias, v[0], v[1], v[2], v[3]);
++    }
++    fprintf(cap_, "\n     pc");
++    for (size_t r = 0; r < std::size(c.pc); r++) {
++        fprintf(cap_, " (%.3f %.3f %.3f %.3f)", c.pc[r][0], c.pc[r][1], c.pc[r][2], c.pc[r][3]);
++    }
++}
++
++void D3D11Backend::CaptureShader(const char* kind, uint64_t key, const std::string& src) {
++    if (!cap_sh_.insert(key).second) return;
++    char name[48];
++    snprintf(name, sizeof(name), "%s_%016llX.hlsl", kind, (unsigned long long)key);
++    if (FILE* f = _wfopen((cap_dir_ / name).c_str(), L"w")) {
++        fwrite(src.data(), 1, src.size(), f);
++        fclose(f);
++    }
++    fprintf(cap_, "     %s\n", name);
++}
++
++void D3D11Backend::CaptureShaders(const State& s, const Assembled& a, const DrawShaders& sh, const PixelKey& pk) {
++    std::string src = ReversedDepthHlsl(VertexHlsl(s, a, sh));
++    CaptureShader("vs", sh.vkey, sh.quad ? QuadHlsl(std::move(src)) : src);
++    CaptureShader("ps", sh.pkey, PixelHlsl(pk));
++}
++
++bool UnitTexcoords(const Assembled& a) {
++    constexpr float kLo = -1e-4f;
++    constexpr float kHi = 1.0001f;
++    constexpr uint32_t kSmallDrawVertices = 4096;
++    if (!a.vertices.empty() || !a.vertex_count || a.vertex_count > kSmallDrawVertices) return false;
++    bool any = false;
++    for (int r = 0; r < 16; r++) {
++        const VertexElement& e = a.elements[size_t(r)];
++        if (!(a.regs >> r & 1) || e.format != DXGI_FORMAT_R32G32_FLOAT) continue;
++        const VertexBuffer& vb = a.buffers[e.buffer];
++        if (!vb.src || !vb.stride || uint64_t(a.vertex_count) * vb.stride > vb.bytes) return false;
++        for (uint32_t v = 0; v < a.vertex_count; v++) {
++            float uv[2];
++            std::memcpy(uv, vb.src + size_t(v) * vb.stride + e.offset, sizeof(uv));
++            if (!(uv[0] >= kLo && uv[0] <= kHi && uv[1] >= kLo && uv[1] <= kHi)) return false;
++        }
++        any = true;
++    }
++    return any;
++}
++
++bool AnyStageWraps(const State& s) {
++    for (const auto& t : s.tss) {
++        if (t[kTssAddressU] == kTaddressWrap || t[kTssAddressV] == kTaddressWrap) return true;
++    }
++    return false;
++}
++
++void D3D11Backend::SetTextureViewsAndSamplers(const State& s, const Assembled& a, DrawTextures& stages) {
++    ctx_->PSSetShaderResources(0, 4, stages.srv);
++    bool clamp = AnyStageWraps(s) && UnitTexcoords(a);
++    D3D11_SAMPLER_DESC sd[4];
++    uint32_t aniso = app::Get().aniso;
++    for (int i = 0; i < 4; i++) sd[i] = StageSampler(s, i, stages, clamp, aniso);
++    uint64_t key = Hash(sd, sizeof(sd));
++    auto it = samplers_.find(key);
++    if (it == samplers_.end()) {
++        // the runtime keeps 4096 sampler objects at most
++        if (samplers_.size() > 1024) samplers_.clear();
++        auto& set = samplers_[key];
++        for (int i = 0; i < 4; i++) dev_->CreateSamplerState(&sd[i], &set[i]);
++        it = samplers_.find(key);
++    }
++    ID3D11SamplerState* ss[4] = {it->second[0].Get(), it->second[1].Get(), it->second[2].Get(), it->second[3].Get()};
++    ctx_->PSSetSamplers(0, 4, ss);
++}
++
++// viewport covers the target, the guest viewport is in the shader; scissor clips to it
++void D3D11Backend::SetViewportScissor(const State& s, uint32_t gw) {
++    float W = float(bound_rt_ ? bound_rt_->w : bound_ds_->w);
++    float H = float(bound_rt_ ? bound_rt_->h : bound_ds_->h);
++    D3D11_VIEWPORT vp{0, 0, W, H, 0, 1};
++    float sc = W / gw;
++    LONG x0 = LONG(s.viewport.x * sc);
++    LONG y0 = LONG(s.viewport.y * sc);
++    LONG x1 = LONG((s.viewport.x + s.viewport.w) * sc);
++    LONG y1 = LONG((s.viewport.y + s.viewport.h) * sc);
++    if (s.scissor_count) {
++        x0 = std::max(x0, LONG(s.scissors[0] * sc));
++        y0 = std::max(y0, LONG(s.scissors[1] * sc));
++        x1 = std::min(x1, LONG(s.scissors[2] * sc));
++        y1 = std::min(y1, LONG(s.scissors[3] * sc));
++    }
++    D3D11_RECT rect{std::clamp<LONG>(x0, 0, LONG(W)), std::clamp<LONG>(y0, 0, LONG(H)),
++                    std::clamp<LONG>(x1, 0, LONG(W)), std::clamp<LONG>(y1, 0, LONG(H))};
++    ctx_->RSSetViewports(1, &vp);
++    ctx_->RSSetScissorRects(1, &rect);
++}
++
++// the pipeline's objects, with the blend factor and stencil reference that go with them in Direct3D 11
++void D3D11Backend::SetPipeline(const Pipeline& p, const State& s) {
++    float bf[4];
++    Color(SimpleState(s, kMBlendColor), bf);
++    uint32_t ref = SimpleState(s, kMStencilRef) & 0xFF;
++    bool same_output = binds_.pipe == &p && !std::memcmp(bf, binds_.blend, sizeof(bf)) && ref == binds_.stencil;
++    if (binds_.pipe != &p) {
++        ctx_->IASetInputLayout(p.il.Get());
++        ctx_->VSSetShader(p.vs.Get(), nullptr, 0);
++        ctx_->GSSetShader(p.gs.Get(), nullptr, 0);
++        ctx_->PSSetShader(p.ps.Get(), nullptr, 0);
++        ctx_->RSSetState(p.rs.Get());
++    }
++    if (!same_output) {
++        ctx_->OMSetBlendState(p.bs.Get(), bf, 0xFFFFFFFF);
++        ctx_->OMSetDepthStencilState(p.dss.Get(), ref);
++    }
++    binds_.pipe = &p;
++    std::memcpy(binds_.blend, bf, sizeof(bf));
++    binds_.stencil = ref;
++}
++
++D3D11_PRIMITIVE_TOPOLOGY PrimitiveTopology(const Assembled& a) {
++    if (a.topology == Topology::Points) return D3D11_PRIMITIVE_TOPOLOGY_POINTLIST;
++    if (a.topology == Topology::Lines) return a.strip ? D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP : D3D11_PRIMITIVE_TOPOLOGY_LINELIST;
++    return a.strip ? D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
++}
++
++void D3D11Backend::DrawGeometry(const Assembled& a) {
++    for (uint32_t i = 0; i < a.buffer_count; i++) {
++        const VertexBuffer& b = a.buffers[i];
++        ID3D11Buffer* buf = nullptr;
++        uint32_t off = 0;
++        if (!Put(vertices_, b.src, b.bytes, 16, buf, off)) return;
++        UINT stride = b.stride;
++        ctx_->IASetVertexBuffers(i, 1, &buf, &stride, &off);
++    }
++    D3D11_PRIMITIVE_TOPOLOGY topology = PrimitiveTopology(a);
++    if (topology != binds_.topology) ctx_->IASetPrimitiveTopology(topology);
++    binds_.topology = topology;
++    if (a.index_count) {
++        uint32_t ibytes = a.index_count * (a.index16 ? 2 : 4);
++        ID3D11Buffer* buf = nullptr;
++        uint32_t off = 0;
++        if (!Put(indices_, a.index_src, ibytes, 4, buf, off)) return;
++        ctx_->IASetIndexBuffer(buf, a.index16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT, off);
++        ctx_->DrawIndexed(a.index_count, 0, a.base_vertex);
++    } else {
++        ctx_->Draw(a.draw_count, 0);
++    }
++}
++
++bool D3D11Backend::AssembleDraw(const State& s, uint32_t prim, uint32_t start, uint32_t count, const uint8_t* indices,
++                                Assembled& a) {
++    bool assembled;
++    {
++        PerfScope perf_assemble{g_perf.assemble};
++        assembled = Assemble(s, prim, start, count, indices, a);
++    }
++    g_perf.verts += a.vertex_count;
++    g_perf.raw += a.vertices.empty();
++    return assembled;
++}
++
++// a draw while the title counts visible pixels gets an occlusion query of its own
++uint32_t D3D11Backend::BeginCountedDraw(const State& s) {
++    if (!s.simple[kMCountEnable >> 2]) return kNoQuery;
++    uint32_t query = query_next_++ % kQueries;
++    auto& q = queries_[query];
++    if (!q) {
++        D3D11_QUERY_DESC qd{D3D11_QUERY_OCCLUSION, 0};
++        if (FAILED(dev_->CreateQuery(&qd, &q))) {
++            LOG_FIRST(1, "d3d11: no occlusion queries, visibility tests stay pending");
++            return kNoQuery;
++        }
++    }
++    ctx_->Begin(q.Get());
++    return query;
++}
++
++void D3D11Backend::EndCountedDraw(uint32_t query) {
++    if (query == kNoQuery) return;
++    ctx_->End(queries_[query].Get());
++    counted_.push_back({query, SamplesPerPixel()});
++}
++
++float D3D11Backend::SamplesPerPixel() const {
++    const Target* t = bound_rt_ ? bound_rt_ : bound_ds_;
++    if (!t || !t->gw || !t->gh) return 1;
++    return float(t->w) * float(t->h) / (float(t->gw) * float(t->gh));
++}
++
++// reports whose draws the GPU has finished, written as the console's GPU writes them: time, count, then 0 for done
++void D3D11Backend::DeliverReports() {
++    constexpr uint32_t kTime = 0;
++    constexpr uint32_t kTimeHigh = 4;
++    constexpr uint32_t kCount = 8;
++    constexpr uint32_t kStatus = 12;
++    while (!reports_.empty()) {
++        const Report& r = reports_.front();
++        double pixels = 0;
++        bool ready = true;
++        for (const Query& q : r.queries) {
++            UINT64 n = 0;
++            if (ctx_->GetData(queries_[q.index].Get(), &n, sizeof(n), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) {
++                ready = false;
++                break;
++            }
++            pixels += double(n) / q.samples_per_pixel;
++        }
++        if (!ready) return;
++        kernel::W32(r.va + kTime, uint32_t(presents_));
++        kernel::W32(r.va + kTimeHigh, 0);
++        kernel::W32(r.va + kCount, uint32_t(std::lround(pixels)));
++        std::atomic_thread_fence(std::memory_order_release);
++        kernel::W32(r.va + kStatus, 0);
++        reports_.pop_front();
++    }
++}
++
++void D3D11Backend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t count, const uint8_t* indices) {
++    std::lock_guard lock(ctx_lock_);
++    PerfScope perf_draw{g_perf.draw};
++    g_perf.draws++;
++    if (cap_) CapStep(s.rt);
++    if (DepthCopy(s)) return;
++    Assembled& a = asm_;
++    if (!AssembleDraw(s, prim, start, count, indices, a)) return;
++    if (!BindTargets(s)) return;
++
++    DrawShaders sh = ClassifyShaders(s, a, count);
++    if (sh.prog) EnsureProgramHash(s);
++    sh.vkey = VertexKey(s, a, sh);
++    EnsureVertexShader(s, a, sh);
++
++    DrawTextures stages;
++    if (!BindStageTexturesAndTargets(s, stages)) return;
++    PixelKey pk = MakePixelKey(s, stages.info);
++    pk.quad = sh.quad;
++    sh.pkey = Hash(&pk, sizeof(pk));
++    EnsurePixelShader(pk, sh);
++    if (!sh.vs_code || !sh.ps_code) return;
++
++    PsoKey k;
++    BuildPipelineKey(s, a, sh.vh, sh.ph, k);
++    Pipeline* pipe = EnsurePipeline(k, sh);
++    if (!pipe) return;
++    SetPipeline(*pipe, s);
++
++    GuestExtent size;
++    SurfaceSize(bound_rt_ ? s.rt : s.zs, size.w, size.h);
++    DrawConstants c{};
++    UploadConstants(s, sh, k, stages, size, c);
++
++    if (cap_) {
++        CaptureDraw(s, prim, count, k, c, stages);
++        if (count <= kQuadVertices) CaptureInputs(s, a, c);
++        fputc('\n', cap_);
++        CaptureShaders(s, a, sh, pk);
++    }
++
++    SetTextureViewsAndSamplers(s, a, stages);
++    SetViewportScissor(s, size.w);
++
++    uint32_t query = BeginCountedDraw(s);
++    DrawGeometry(a);
++    EndCountedDraw(query);
++}
++
++D3D11_RECT ScaledRect(const Target& t, int x0, int y0, int x1, int y1) {
++    float sc = float(t.w) / t.gw;
++    return {std::clamp<LONG>(LONG(x0 * sc), 0, t.w), std::clamp<LONG>(LONG(y0 * sc), 0, t.h),
++            std::clamp<LONG>(LONG(x1 * sc), 0, t.w), std::clamp<LONG>(LONG(y1 * sc), 0, t.h)};
++}
++
++bool Whole(const Target& t, const std::vector<D3D11_RECT>& rs) {
++    return rs.size() == 1 && rs[0].left == 0 && rs[0].top == 0 && rs[0].right == LONG(t.w) && rs[0].bottom == LONG(t.h);
++}
++
++void D3D11Backend::ClearTarget(Target& t, const State& s, const ClearArgs& c, std::vector<D3D11_RECT>& rs) {
++    rs.clear();
++    if (c.count && c.rects) {
++        for (uint32_t i = 0; i < c.count; i++) {
++            int32_t r[4];
++            std::memcpy(r, c.rects + size_t(i) * sizeof(r), sizeof(r));
++            rs.push_back(ScaledRect(t, r[0], r[1], r[2], r[3]));
++        }
++    } else {
++        const auto& v = s.viewport;
++        rs.push_back(ScaledRect(t, int(v.x), int(v.y), int(v.x + v.w), int(v.y + v.h)));
++    }
++    if (t.depth) {
++        float reversed = 1 - std::clamp(c.z, 0.0f, 1.0f);
++        if (Whole(t, rs)) {
++            UINT cf = ((c.flags & kClearZ) ? D3D11_CLEAR_DEPTH : 0) | ((c.flags & kClearStencil) ? D3D11_CLEAR_STENCIL : 0);
++            ctx_->ClearDepthStencilView(t.dsv.Get(), cf, reversed, UINT8(c.stencil));
++        } else {
++            ClearDepthRects(t, c.flags, reversed, c.stencil, rs);
++        }
++    } else {
++        if (LatchCpuWrite(t)) UploadTarget(t, s.rt);
++        float col[4];
++        Color(c.color, col);
++        // D3DCLEAR_TARGET_R/G/B/A are bits 4 to 7, the write mask has the same order
++        uint8_t mask = uint8_t((c.flags & kClearTarget) >> 4);
++        if (mask == D3D11_COLOR_WRITE_ENABLE_ALL && Whole(t, rs)) {
++            ctx_->ClearRenderTargetView(t.rtv.Get(), col);
++        } else {
++            ClearChannels(t, col, mask, rs);
++        }
++    }
++    t.drawn = true;
++}
++
++// a clear of some colour channels or some of the target: drawn over each rect writing only those
++void D3D11Backend::ClearChannels(Target& t, const float col[4], uint8_t mask, const std::vector<D3D11_RECT>& rs) {
++    Pipeline* p = FullScreenPipeline(kClearKey | mask, kClearHlsl, "psmain", OpaqueBlend(mask), NoDepth());
++    if (!p) {
++        LOG_FIRST(4, "d3d11: channel clear pipeline failed, mask %X", mask);
++        return;
++    }
++    SetBlitTarget(t.rtv.Get(), t.w, t.h);
++    for (const D3D11_RECT& r : rs) {
++        if (r.right <= r.left || r.bottom <= r.top) continue;
++        SetScissor(r);
++        DrawFullScreen(*p, col, 4 * sizeof(float), nullptr, 0);
++    }
++}
++
++// Direct3D 11 clears a whole depth buffer only: rects are drawn, writing the depth and stencil asked for
++void D3D11Backend::ClearDepthRects(Target& t, uint32_t flags, float depth, uint32_t stencil,
++                                   const std::vector<D3D11_RECT>& rs) {
++    bool z = flags & kClearZ;
++    bool st = flags & kClearStencil;
++    D3D11_DEPTH_STENCIL_DESC dd = NoDepth();
++    dd.DepthEnable = z;
++    dd.DepthWriteMask = z ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
++    dd.StencilEnable = st;
++    D3D11_DEPTH_STENCILOP_DESC replace{D3D11_STENCIL_OP_REPLACE, D3D11_STENCIL_OP_REPLACE, D3D11_STENCIL_OP_REPLACE,
++                                       D3D11_COMPARISON_ALWAYS};
++    dd.FrontFace = dd.BackFace = replace;
++    Pipeline* p = FullScreenPipeline(kDepthClearKey | (z ? 1 : 0) | (st ? 2 : 0), kClearHlsl, "depthmain",
++                                     OpaqueBlend(0), dd);
++    if (!p) {
++        LOG_FIRST(4, "d3d11: depth clear pipeline failed");
++        return;
++    }
++    ID3D11ShaderResourceView* none[4] = {};
++    ctx_->PSSetShaderResources(0, 4, none);
++    SetTargets(nullptr, t.dsv.Get());
++    bound_rt_ = bound_ds_ = nullptr;
++    SetFullViewport(t.w, t.h);
++    float c[4] = {depth, 0, 0, 0};
++    for (const D3D11_RECT& r : rs) {
++        if (r.right <= r.left || r.bottom <= r.top) continue;
++        SetScissor(r);
++        DrawFullScreen(*p, c, sizeof(c), nullptr, 0, stencil & 0xFF);
++    }
++}
++
++void D3D11Backend::Clear(const State& s, uint32_t count, const uint8_t* rects, uint32_t flags, uint32_t color, float z,
++                         uint32_t stencil) {
++    std::lock_guard lock(ctx_lock_);
++    PerfScope perf_clear{g_perf.clear};
++    if (cap_) {
++        CapStep(s.rt);
++        fprintf(cap_, "%04u clear rt %08X ds %08X flags %X color %08X z %.3f\n", cap_i_++, s.rt.data, s.zs.data, flags,
++                color, z);
++    }
++    Target* rt = (flags & kClearTarget) ? EnsureTarget(s.rt, false) : nullptr;
++    Target* ds = (flags & (kClearZ | kClearStencil)) ? EnsureTarget(s.zs, true) : nullptr;
++    std::vector<D3D11_RECT> rs;
++    ClearArgs c{.count = count, .rects = rects, .flags = flags, .color = color, .z = z, .stencil = stencil};
++    for (Target* t : {rt, ds}) {
++        if (t) ClearTarget(*t, s, c, rs);
++    }
++}
++
++constexpr uint32_t kGuestRectBytes = 16;
++constexpr uint32_t kGuestPointBytes = 8;
++
++struct GuestRect {
++    int32_t left;
++    int32_t top;
++    int32_t right;
++    int32_t bottom;
++};
++
++struct GuestPoint {
++    int32_t x;
++    int32_t y;
++};
++
++GuestRect ReadGuestRect(uint32_t rects, uint32_t i) {
++    uint32_t r = rects + i * kGuestRectBytes;
++    return {int32_t(kernel::R32(r)), int32_t(kernel::R32(r + 4)), int32_t(kernel::R32(r + 8)), int32_t(kernel::R32(r + 12))};
++}
++
++GuestPoint ReadGuestPoint(uint32_t points, uint32_t i) {
++    uint32_t p = points + i * kGuestPointBytes;
++    return {int32_t(kernel::R32(p)), int32_t(kernel::R32(p + 4))};
++}
++
++struct DrawnRect {
++    float x0 = 0;
++    float y0 = 0;
++    float x1 = 0;
++    float y1 = 0;
++    float dx = 0;
++    float dy = 0;
++};
++
++DrawnRect ReadDrawnRect(uint32_t src_rects, uint32_t dst_points, uint32_t i) {
++    GuestRect g = ReadGuestRect(src_rects, i);
++    DrawnRect r;
++    r.x0 = float(g.left);
++    r.y0 = float(g.top);
++    r.x1 = float(g.right);
++    r.y1 = float(g.bottom);
++    r.dx = r.x0;
++    r.dy = r.y0;
++    if (dst_points) {
++        GuestPoint p = ReadGuestPoint(dst_points, i);
++        r.dx = float(p.x);
++        r.dy = float(p.y);
++    }
++    return r;
++}
++
++UINT ScaleUnsigned(int32_t v, float sc) { return UINT(uint32_t(v) * sc); }
++
++constexpr float kTapsSlack = 1e-3f;
++
++// one Blit per rect: for formats that differ
++void D3D11Backend::CopyByDraw(const Target& src_t, Target& dst_t, const CopyList& l) {
++    ID3D11ShaderResourceView* none[4] = {};
++    ctx_->PSSetShaderResources(0, 4, none);
++    SetTargets(dst_t.rtv.Get(), nullptr);
++    float src_scale = float(src_t.w) / src_t.gw;
++    float dst_scale = float(dst_t.w) / dst_t.gw;
++    bool listed = l.count && l.src_rects;
++    uint32_t n = listed ? l.count : 1;
++    for (uint32_t i = 0; i < n; i++) {
++        float whole_w = float(std::min(src_t.gw, dst_t.gw));
++        float whole_h = float(std::min(src_t.gh, dst_t.gh));
++        DrawnRect r{.x0 = 0, .y0 = 0, .x1 = whole_w, .y1 = whole_h};
++        if (listed) r = ReadDrawnRect(l.src_rects, l.dst_points, i);
++        if (r.x1 <= r.x0 || r.y1 <= r.y0) continue;
++        D3D11_VIEWPORT vp{r.dx * dst_scale, r.dy * dst_scale, (r.x1 - r.x0) * dst_scale, (r.y1 - r.y0) * dst_scale, 0, 1};
++        LONG right = std::min(LONG(vp.TopLeftX + vp.Width), LONG(dst_t.w));
++        LONG bottom = std::min(LONG(vp.TopLeftY + vp.Height), LONG(dst_t.h));
++        D3D11_RECT scissor{LONG(vp.TopLeftX), LONG(vp.TopLeftY), right, bottom};
++        if (scissor.right <= scissor.left || scissor.bottom <= scissor.top) continue;
++        ctx_->RSSetViewports(1, &vp);
++        ctx_->RSSetScissorRects(1, &scissor);
++        float uv[4] = {r.x0 / src_t.gw, r.y0 / src_t.gh, (r.x1 - r.x0) / src_t.gw, (r.y1 - r.y0) / src_t.gh};
++        uint32_t taps = uint32_t(std::ceil(std::max(src_scale / dst_scale, 1.0f) - kTapsSlack));
++        Blit(src_t.srv.Get(), uv, {.alpha = true, .taps = taps});
++    }
++    dst_t.drawn = true;
++    bound_rt_ = bound_ds_ = nullptr;
++}
++
++// one CopySubresourceRegion per rect, clamped to both targets
++void D3D11Backend::CopyByRegion(const Target& src_t, Target& dst_t, const CopyList& l) {
++    float dst_scale = float(dst_t.w) / dst_t.gw;
++    bool listed = l.count && l.src_rects;
++    uint32_t n = listed ? l.count : 1;
++    for (uint32_t i = 0; i < n; i++) {
++        D3D11_BOX b{0, 0, 0, std::min(src_t.w, dst_t.w), std::min(src_t.h, dst_t.h), 1};
++        uint32_t dx = 0;
++        uint32_t dy = 0;
++        if (listed) {
++            GuestRect r = ReadGuestRect(l.src_rects, i);
++            b.left = ScaleUnsigned(r.left, dst_scale);
++            b.top = ScaleUnsigned(r.top, dst_scale);
++            b.right = std::min(ScaleUnsigned(r.right, dst_scale), src_t.w);
++            b.bottom = std::min(ScaleUnsigned(r.bottom, dst_scale), src_t.h);
++            dx = b.left;
++            dy = b.top;
++            if (l.dst_points) {
++                GuestPoint p = ReadGuestPoint(l.dst_points, i);
++                dx = ScaleUnsigned(p.x, dst_scale);
++                dy = ScaleUnsigned(p.y, dst_scale);
++            }
++        }
++        if (b.right <= b.left || b.bottom <= b.top || dx >= dst_t.w || dy >= dst_t.h) continue;
++        b.right = std::min<UINT>(b.right, b.left + dst_t.w - dx);
++        b.bottom = std::min<UINT>(b.bottom, b.top + dst_t.h - dy);
++        ctx_->CopySubresourceRegion(dst_t.res.Get(), 0, dx, dy, 0, src_t.res.Get(), 0, &b);
++    }
++    dst_t.drawn = true;
++}
++
++void D3D11Backend::Copy(const Surface& src, const Surface& dst, uint32_t count, uint32_t src_rects,
++                        uint32_t dst_points) {
++    std::lock_guard lock(ctx_lock_);
++    PerfScope perf_copy{g_perf.copy};
++    Target* src_t = FindTarget(src, false);
++    if (cap_) {
++        const char* from = "memory";
++        if (src_t) from = src_t->drawn ? "target" : "idle target";
++        fprintf(cap_, "%04u copy %08X %s to %08X\n", cap_i_++, src.data, from, dst.data);
++    }
++    if (!src_t || !src_t->drawn) {
++        if (!CopySurfaceMemory(src, dst, count, src_rects, dst_points)) {
++            LOG_FIRST(8, "d3d11: CopyRects %08X to %08X skipped", src.data, dst.data);
++        } else if (Target* dst_t = FindTarget(dst, false)) {
++            UploadTarget(*dst_t, dst);
++        }
++        return;
++    }
++    Target* dst_t = EnsureTarget(dst, false);
++    if (!dst_t || src_t == dst_t) return;
++    CopyList l{.count = count, .src_rects = src_rects, .dst_points = dst_points};
++    if (src_t->fmt != dst_t->fmt) {
++        CopyByDraw(*src_t, *dst_t, l);
++        return;
++    }
++    CopyByRegion(*src_t, *dst_t, l);
++    if (cap_) {
++        char name[32];
++        snprintf(name, sizeof(name), "%04u_copy_%08X", cap_i_, dst_t->data);
++        CapSave(*dst_t, name);
++    }
++}
++
++void D3D11Backend::ResizeSwap() {
++    HWND hwnd = static_cast<HWND>(app::Window());
++    RECT rc;
++    GetClientRect(hwnd, &rc);
++    uint32_t w = std::max<LONG>(rc.right - rc.left, 1);
++    uint32_t h = std::max<LONG>(rc.bottom - rc.top, 1);
++    if (w == bb_w_ && h == bb_h_) return;
++    ctx_->OMSetRenderTargets(0, nullptr, nullptr);
++    bound_rt_ = bound_ds_ = nullptr;
++    bb_rtv_.Reset();
++    ctx_->Flush();
++    swap_->ResizeBuffers(0, w, h, DXGI_FORMAT_UNKNOWN, tearing_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
++    CreateBackBufferView();
++    bb_w_ = w;
++    bb_h_ = h;
++}
++
++void D3D11Backend::FinishCapture(const Surface& front) {
++    CapStep(Surface{});
++    if (Target* f = FindTarget(front, false)) CapSave(*f, "final");
++    for (auto& t : cap_tex_) {
++        char name[32];
++        snprintf(name, sizeof(name), "tex_%08X", t.data);
++        CapSave(t.srv.Get(), t.w, t.h, name);
++    }
++    fclose(cap_);
++    cap_ = nullptr;
++    cap_tex_.clear();
++    LOGI("d3d11: frame captured to %s", cap_dir_.string().c_str());
++}
++
++void D3D11Backend::StartCapture() {
++    SYSTEMTIME tm;
++    GetLocalTime(&tm);
++    char stamp[32];
++    snprintf(stamp, sizeof(stamp), "%02u%02u%02u", tm.wHour, tm.wMinute, tm.wSecond);
++    std::error_code ec;
++    cap_dir_ = std::filesystem::weakly_canonical(app::ExeDir() / diag::CaptureDir() / stamp, ec);
++    std::filesystem::create_directories(cap_dir_, ec);
++    cap_ = _wfopen((cap_dir_ / "frame.txt").c_str(), L"w");
++    cap_i_ = cap_rt_ = 0;
++    cap_seen_.clear();
++    cap_sh_.clear();
++}
++
++constexpr int kRampRed = 0;
++constexpr int kRampGreen = 256;
++constexpr int kRampBlue = 512;
++
++void D3D11Backend::UploadGammaRamp() {
++    ramp_dirty_ = false;
++    uint8_t px[256 * 4];
++    bool identity = true;
++    for (int i = 0; i < 256; i++) {
++        px[i * 4] = ramp_[kRampBlue + i];
++        px[i * 4 + 1] = ramp_[kRampGreen + i];
++        px[i * 4 + 2] = ramp_[kRampRed + i];
++        px[i * 4 + 3] = 255;
++        identity &= ramp_[kRampRed + i] == i && ramp_[kRampGreen + i] == i && ramp_[kRampBlue + i] == i;
++    }
++    gamma_ = !identity;
++    if (lut_) ctx_->UpdateSubresource(lut_.Get(), 0, nullptr, px, sizeof(px), sizeof(px));
++}
++
++void D3D11Backend::BlitFrame(Target& t) {
++    // 16:9 when the console reports a widescreen display, else 4:3
++    bool wide = app::Widescreen();
++    float aspect = wide ? 16.0f / 9.0f : 4.0f / 3.0f;
++    float w = float(bb_w_);
++    float h = float(bb_h_);
++    float vw = std::min(w, h * aspect);
++    float vh = vw / aspect;
++    float uv[4] = {0, 0, 1, 1};
++    D3D11_VIEWPORT vp{(w - vw) / 2, (h - vh) / 2, vw, vh, 0, 1};
++    D3D11_RECT scissor{0, 0, LONG(bb_w_), LONG(bb_h_)};
++    ctx_->RSSetViewports(1, &vp);
++    ctx_->RSSetScissorRects(1, &scissor);
++    Blit(t.srv.Get(), uv, {.gamma = gamma_});
++}
++
++void D3D11Backend::RenderUi() {
++    if (!ui_) return;
++    std::lock_guard lock(app::UiLock());
++    ImGui_ImplDX11_NewFrame();
++    ImGui_ImplWin32_NewFrame();
++    ImGui::NewFrame();
++    if (app::kGame.ui) app::kGame.ui(fps_);
++    ImGui::Render();
++    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
++    binds_ = {};
++}
++
++void D3D11Backend::DrawFrame(Target* t) {
++    float black[4] = {0, 0, 0, 1};
++    ID3D11ShaderResourceView* none[4] = {};
++    ctx_->PSSetShaderResources(0, 4, none);
++    ctx_->ClearRenderTargetView(bb_rtv_.Get(), black);
++    ID3D11RenderTargetView* rtv = bb_rtv_.Get();
++    ctx_->OMSetRenderTargets(1, &rtv, nullptr);
++    bound_rt_ = bound_ds_ = nullptr;
++    if (t) BlitFrame(*t);
++    RenderUi();
++}
++
++void D3D11Backend::ReleaseOldTextures() {
++    constexpr uint64_t kSweepEvery = 60;
++    constexpr size_t kTexturesKept = 2048;
++    constexpr uint64_t kIdleFrames = 600;
++    if (presents_ % kSweepEvery != 0 || textures_.size() <= kTexturesKept) return;
++    for (auto it = textures_.begin(); it != textures_.end();) {
++        if (it->second.frame + kIdleFrames < presents_) {
++            it = textures_.erase(it);
++        } else {
++            ++it;
++        }
++    }
++}
++
++void D3D11Backend::CountFps() {
++    fps_n_++;
++    auto now = std::chrono::steady_clock::now();
++    double el = std::chrono::duration<double>(now - fps_t_).count();
++    if (el >= 0.5) {
++        fps_ = fps_n_ / el;
++        fps_n_ = 0;
++        fps_t_ = now;
++    }
++}
++
++void LogPerf() {
++    static PerfClock::time_point perf_start = PerfClock::now();
++    static uint64_t perf_frames = 0;
++    perf_frames++;
++    double el = PerfMs(perf_start);
++    if (el < 1000.0) return;
++    Perf& p = g_perf;
++    double n = double(perf_frames);
++    double host = p.draw + p.clear + p.copy + p.present + p.sync;
++    LOGI("perf: %.1f fps %.2f ms/frame | host %.2f (draw %.2f: assemble %.2f bind %.2f [check %.2f, upload %.2f] "
++         "compile %.2f; clear %.2f copy %.2f sync %.2f present %.2f [swap %.2f]) other %.2f",
++         n * 1000.0 / el, el / n, host / n, p.draw / n, p.assemble / n, p.bind / n, p.sig / n, p.texup / n,
++         p.compile / n, p.clear / n, p.copy / n, p.sync / n, p.present / n, p.swap / n, (el - host) / n);
++    LOGI("perf: title thread per frame: recording %.2f ms, waiting %.2f ms (%.1f waits)",
++         g_perf_capture_ns.exchange(0) / n / 1e6, g_perf_wait_ns.exchange(0) / n / 1e6, g_perf_waits.exchange(0) / n);
++    LOGI("perf: per frame %.0f draws (%.0f raw) %.0fk verts %.1f MB upload %.1f overflow | %.1f tex uploads %.2f MB, "
++         "%.1f new tex, %.1f new targets, %.1f target uploads, %.1f shrinks, %.1f read-backs %.1f late | %llu shaders "
++         "%llu pipelines this second",
++         p.draws / n, p.raw / n, p.verts / n / 1000.0, p.upload / n / 1048576.0, p.overflow / n, p.texups / n,
++         p.texup_bytes / n / 1048576.0, p.newtex / n, p.targets / n, p.rtups / n, p.shrinks / n, p.syncs / n,
++         p.lates / n, (unsigned long long)p.shaders, (unsigned long long)p.psos);
++    g_perf = Perf{};
++    perf_start = PerfClock::now();
++    perf_frames = 0;
++}
++
++void D3D11Backend::Present(const Surface& front) {
++    std::lock_guard lock(ctx_lock_);
++    PerfScope perf_present{g_perf.present};
++    if (cap_) {
++        FinishCapture(front);
++    } else if (g_capture.exchange(false) && CaptureOn()) {
++        StartCapture();
++    }
++    ResizeSwap();
++    Target* t = EnsureTarget(front, false);
++    if (t && LatchCpuWrite(*t)) UploadTarget(*t, front);
++    if (ramp_dirty_) UploadGammaRamp();
++    DrawFrame(t);
++    DeliverReports();
++    bool vsync = app::Get().vsync;
++    auto perf_swap = PerfClock::now();
++    swap_->Present(vsync ? 1 : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0);
++    g_perf.swap += PerfMs(perf_swap);
++    // the flip model unbinds the back buffer
++    bound_rt_ = bound_ds_ = nullptr;
++    oversized_.clear();
++    presents_++;
++    presents_seen_.store(presents_);
++    frame_++;
++    ReleaseOldTextures();
++    CountFps();
++    if (diag::Perf()) LogPerf();
++    ApplySettings();
++}
++
++void D3D11Backend::ApplySettings() {
++    if (texturedumper::Update()) pack_textures_.clear();
++    float want = app::RenderScale(guest_h_);
++    if (std::fabs(want - scale_) > 1e-4f) {
++        ctx_->OMSetRenderTargets(0, nullptr, nullptr);
++        ID3D11ShaderResourceView* none[4] = {};
++        ctx_->PSSetShaderResources(0, 4, none);
++        targets_.clear();
++        late_.clear();
++        scale_ = want;
++        bound_rt_ = bound_ds_ = nullptr;
++    }
++}
++
++bool D3D11Backend::TargetStale(uint32_t data) const {
++    auto it = target_used_.find(data);
++    uint64_t used = it == target_used_.end() ? 0 : it->second;
++    return frame_ - used > kStaleFrames;
++}
++
++// filters src into a w x h BGRA texture, into when given, else a new one
++ComPtr<ID3D11Texture2D> D3D11Backend::Shrink(ID3D11ShaderResourceView* src, uint32_t w, uint32_t h, uint32_t taps,
++                                             float mul, ID3D11Texture2D* into) {
++    g_perf.shrinks++;
++    ComPtr<ID3D11Texture2D> down = into;
++    if (!down) {
++        D3D11_TEXTURE2D_DESC td{w, h, 1, 1, kBgra, {1, 0}, D3D11_USAGE_DEFAULT,
++                                D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE, 0, 0};
++        if (FAILED(dev_->CreateTexture2D(&td, nullptr, &down))) return nullptr;
++    }
++    ComPtr<ID3D11RenderTargetView> rtv;
++    if (FAILED(dev_->CreateRenderTargetView(down.Get(), nullptr, &rtv))) return nullptr;
++    SetBlitTarget(rtv.Get(), w, h);
++    float uv[4] = {0, 0, 1, 1};
++    Blit(src, uv, {.alpha = true, .taps = taps, .mul = mul});
++    return down;
++}
++
++// the target as a guest sized BGRA texture: itself, or shrunk into a copy
++ComPtr<ID3D11Texture2D> D3D11Backend::CopySource(Target& t, ID3D11Texture2D* into) {
++    if (t.w != t.gw || t.h != t.gh || t.fmt != kBgra) return Shrink(t.srv.Get(), t.gw, t.gh, 1, 1, into);
++    return t.res;
++}
++
++// a BGRA texture to the CPU, rows packed; waits for the GPU
++bool D3D11Backend::ReadBack(ID3D11Texture2D* res, uint32_t w, uint32_t h, std::vector<uint8_t>& out) {
++    D3D11_TEXTURE2D_DESC td{w, h, 1, 1, kBgra, {1, 0}, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ, 0};
++    ComPtr<ID3D11Texture2D> rb;
++    if (FAILED(dev_->CreateTexture2D(&td, nullptr, &rb))) return false;
++    D3D11_BOX box{0, 0, 0, w, h, 1};
++    ctx_->CopySubresourceRegion(rb.Get(), 0, 0, 0, 0, res, 0, &box);
++    D3D11_MAPPED_SUBRESOURCE m;
++    if (FAILED(ctx_->Map(rb.Get(), 0, D3D11_MAP_READ, 0, &m))) return false;
++    out.resize(size_t(w) * h * 4);
++    for (uint32_t y = 0; y < h; y++) {
++        std::memcpy(&out[size_t(y) * w * 4], static_cast<const uint8_t*>(m.pData) + size_t(y) * m.RowPitch, w * 4);
++    }
++    ctx_->Unmap(rb.Get(), 0);
++    return true;
++}
++
++// the CPU reads a surface the GPU drew: bring the pixels back
++void D3D11Backend::Sync(uint32_t data, uint32_t) {
++    std::lock_guard lock(ctx_lock_);
++    auto it = targets_.find(TargetMapKey(data, false));
++    if (it == targets_.end() || !it->second.drawn || TargetStale(data)) return;
++    PerfScope perf_sync{g_perf.sync};
++    g_perf.syncs++;
++    Target& t = it->second;
++    ComPtr<ID3D11Texture2D> src = CopySource(t);
++    std::vector<uint8_t> px;
++    if (!src || !ReadBack(src.Get(), t.gw, t.gh, px)) return;
++    uint32_t pitch = GuestPitch(t.gw);
++    uint8_t* guest = static_cast<uint8_t*>(kernel::HostPtr(data));
++    for (uint32_t y = 0; y < t.gh; y++) std::memcpy(guest + size_t(y) * pitch, &px[size_t(y) * t.gw * 4], t.gw * 4);
++    t.read = std::move(px);
++    t.drawn = false;
++    t.sig = MemSig(t.data, t.bytes);
++}
++
++void D3D11Backend::SyncLate(uint32_t data) {
++    if (!DeliverLate(data)) Sync(data, 0);
++    RecordLate(data);
++}
++
++// the newest finished copy of a surface locked without a wait, into guest memory; false when none is
++bool D3D11Backend::DeliverLate(uint32_t data) {
++    std::lock_guard ctx_lock(ctx_lock_);
++    std::lock_guard lock(late_lock_);
++    auto it = late_.find(data);
++    if (it == late_.end()) return false;
++    Late& l = it->second;
++    uint64_t now = presents_seen_.load();
++    int best = -1;
++    for (int i = 0; i < kLateSlots; i++) {
++        bool finished = l.seq[i] && l.done[i] && ctx_->GetData(l.done[i].Get(), nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK;
++        bool recent = now - l.frame[i] <= uint64_t(kLateSlots) + 1;
++        bool newest = best < 0 || l.seq[i] > l.seq[best];
++        if (finished && recent && newest) best = i;
++    }
++    if (best < 0) return false;
++    if (l.seq[best] > l.delivered) {
++        D3D11_MAPPED_SUBRESOURCE m;
++        if (FAILED(ctx_->Map(l.rb[best].Get(), 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m))) return false;
++        uint32_t pitch = GuestPitch(l.gw);
++        uint8_t* dst = static_cast<uint8_t*>(kernel::HostPtr(data));
++        for (uint32_t y = 0; y < l.gh; y++) {
++            std::memcpy(dst + size_t(y) * pitch, static_cast<const uint8_t*>(m.pData) + size_t(y) * m.RowPitch, l.gw * 4);
++        }
++        ctx_->Unmap(l.rb[best].Get(), 0);
++        l.delivered = l.seq[best];
++    }
++    return true;
++}
++
++void D3D11Backend::RecordLateCopy(Late& l, uint32_t slot, ID3D11Texture2D* src) {
++    if (!l.rb[slot]) {
++        D3D11_TEXTURE2D_DESC td{l.gw, l.gh, 1, 1, kBgra, {1, 0}, D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ, 0};
++        D3D11_QUERY_DESC qd{D3D11_QUERY_EVENT, 0};
++        if (FAILED(dev_->CreateTexture2D(&td, nullptr, &l.rb[slot])) || FAILED(dev_->CreateQuery(&qd, &l.done[slot]))) {
++            l.rb[slot].Reset();
++            return;
++        }
++    }
++    D3D11_BOX box{0, 0, 0, l.gw, l.gh, 1};
++    ctx_->CopySubresourceRegion(l.rb[slot].Get(), 0, 0, 0, 0, src, 0, &box);
++    ctx_->End(l.done[slot].Get());
++    l.seq[slot] = ++late_seq_;
++    l.frame[slot] = presents_;
++    l.next = (slot + 1) % kLateSlots;
++}
++
++void D3D11Backend::RecordLate(uint32_t data) {
++    std::lock_guard ctx_lock(ctx_lock_);
++    auto it = targets_.find(TargetMapKey(data, false));
++    if (it == targets_.end() || TargetStale(data)) return;
++    Target& t = it->second;
++    PerfScope perf_sync{g_perf.sync};
++    g_perf.lates++;
++    t.sig = MemSig(t.data, t.bytes);
++    t.read.clear();
++    std::lock_guard lock(late_lock_);
++    Late& l = late_[data];
++    if (l.gw != t.gw || l.gh != t.gh) {
++        l = Late{};
++        l.gw = t.gw;
++        l.gh = t.gh;
++    }
++    // a copy for a later lock, unless the GPU is a whole ring behind
++    uint32_t slot = l.next;
++    if (l.seq[slot] && ctx_->GetData(l.done[slot].Get(), nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) return;
++    ComPtr<ID3D11Texture2D> src = CopySource(t, l.down.Get());
++    if (!src) return;
++    if (src != t.res) l.down = src;
++    RecordLateCopy(l, slot, src.Get());
++}
++
++void D3D11Backend::CapSave(ID3D11ShaderResourceView* srv, uint32_t w, uint32_t h, const char* name) {
++    if (!srv) return;
++    ComPtr<ID3D11Texture2D> down = Shrink(srv, w, h, 1, 1);
++    std::vector<uint8_t> px;
++    if (!down || !ReadBack(down.Get(), w, h, px)) return;
++    FILE* f = _wfopen((cap_dir_ / (std::string(name) + ".bmp")).c_str(), L"wb");
++    if (!f) return;
++    uint8_t hd[54] = {'B', 'M'};  // BITMAPFILEHEADER and BITMAPINFOHEADER, top down 32 bit
++    auto put = [&](int o, uint32_t v) { std::memcpy(hd + o, &v, 4); };
++    put(2, 54 + uint32_t(px.size()));
++    put(10, 54);
++    put(14, 40);
++    put(18, w);
++    put(22, uint32_t(-int32_t(h)));
++    hd[26] = 1;
++    hd[28] = 32;
++    put(34, uint32_t(px.size()));
++    fwrite(hd, 1, sizeof(hd), f);
++    fwrite(px.data(), 1, px.size(), f);
++    fclose(f);
++}
++
++void D3D11Backend::CapStep(const Surface& rt) {
++    uint32_t d = rt.header ? mem::VirtualFromPhysical(rt.data) : 0;
++    if (d == cap_rt_) return;
++    auto it = targets_.find(TargetMapKey(cap_rt_, false));
++    if (cap_rt_ && it != targets_.end()) {
++        char name[32];
++        snprintf(name, sizeof(name), "%04u_%08X", cap_i_, cap_rt_);
++        CapSave(it->second, name);
++    }
++    auto z = targets_.find(TargetMapKey(cap_rt_, true));
++    if (cap_rt_ && z != targets_.end()) {
++        char name[32];
++        snprintf(name, sizeof(name), "%04u_%08X_z", cap_i_, cap_rt_);
++        CapSave(z->second, name);
++    }
++    cap_rt_ = d;
++}
++
++void D3D11Backend::SetGamma(const uint8_t* ramp) {
++    std::lock_guard lock(ctx_lock_);
++    std::memcpy(ramp_, ramp, sizeof(ramp_));
++    ramp_dirty_ = true;
++}
++
++}  // namespace
++
++std::unique_ptr<Backend> CreateD3D11Backend() { return std::make_unique<D3D11Backend>(); }
++
++}  // namespace gpu
