@@ -90,5 +90,37 @@ int main() {
     hulk::KeyboardPad(0, pad);
     if (!Check(pad.rx == 1234 && pad.analog[1] == 200 && pad.lx == 0, "Keyboard erased physical controller input")) return 1;
 
+        // 3. Test Menu Mode with Gamepad Detected:
+    // - Cursor is hidden in menu mode when a physical controller is detected
+    // - Mouse inputs in menu do not interfere with controller navigation
+    hulk::KeyboardMessage(nullptr, WM_SETFOCUS, 0, 0, nullptr);
+    hulk::SetMenuModeForTest(1);
+    pad = {}; pad.connected = true;
+    hulk::KeyboardPad(0, pad);
+    if (!Check(hulk::IsGamepadDetected(), "Gamepad was not detected after connected pad poll")) return 1;
+    if (!Check(hulk::IsCursorHiddenForTest(), "Cursor was not hidden in menu mode with gamepad detected")) return 1;
+
+    // Mouse movement/clicks while in menu with gamepad should be ignored
+    hulk::KeyboardMessage(nullptr, WM_MOUSEMOVE, 0, MAKELPARAM(200, 200), nullptr);
+    hulk::KeyboardMessage(nullptr, WM_MOUSEMOVE, 0, MAKELPARAM(200, 140), nullptr);
+    hulk::KeyboardMessage(nullptr, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(100, 100), nullptr);
+    hulk::KeyboardMessage(nullptr, WM_LBUTTONUP, 0, MAKELPARAM(100, 100), nullptr);
+    pad = {}; pad.connected = true;
+    hulk::KeyboardPad(0, pad);
+    if (!Check(pad.buttons == 0 && pad.analog[0] == 0, "Mouse menu navigation was not ignored while gamepad detected")) return 1;
+
+    // Disconnecting the controller in menu mode restores cursor visibility for mouse/keyboard
+    pad = {}; pad.connected = false;
+    hulk::KeyboardPad(0, pad);
+    if (!Check(!hulk::IsGamepadDetected(), "Gamepad remained detected after disconnected pad poll")) return 1;
+    if (!Check(!hulk::IsCursorHiddenForTest(), "Cursor remained hidden in menu mode after gamepad disconnected")) return 1;
+
+    // In gameplay mode, cursor is always hidden whether gamepad is connected or not
+    hulk::SetMenuModeForTest(-1);
+    if (!Check(hulk::IsCursorHiddenForTest(), "Cursor was not hidden in gameplay mode without gamepad")) return 1;
+    hulk::SetGamepadDetected(true);
+    if (!Check(hulk::IsCursorHiddenForTest(), "Cursor was not hidden in gameplay mode with gamepad")) return 1;
+    hulk::SetGamepadDetected(false);
+
     std::puts("Gameplay mouse-look, cursor hiding, and menu controls passed.");
 }

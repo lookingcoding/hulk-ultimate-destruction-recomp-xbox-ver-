@@ -116,6 +116,15 @@ std::atomic<HWND> game_hwnd{nullptr};
 std::atomic<bool> window_focused{true};
 std::atomic<int> test_mode_override{0};
 std::atomic<bool> cursor_hidden{false};
+std::atomic<bool> gamepad_detected{false};
+
+enum class CursorMode {
+    Unknown = -1,
+    Visible = 0,    // unhidden, unclipped (menu without gamepad, or unfocused)
+    GameplayLock,   // hidden, centered and clipped for mouse-look (gameplay)
+    MenuHidden,     // hidden, unclipped (menu with gamepad)
+};
+CursorMode current_cursor_mode = CursorMode::Unknown;
 std::atomic<int> last_polled_menu_state{-1};
 std::atomic<bool> raw_input_registered{false};
 
@@ -329,16 +338,35 @@ bool CenterCursorInWindow(HWND hwnd, POINT& center_client) {
 }
 
 void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
-    const bool should_hide = !in_menu && window_focused.load(std::memory_order_relaxed);
-    const bool was_hidden = cursor_hidden.exchange(should_hide, std::memory_order_relaxed);
-    if (should_hide) {
-        if (!was_hidden) {
+    const bool focused = window_focused.load(std::memory_order_relaxed);
+    const bool gamepad = gamepad_detected.load(std::memory_order_relaxed);
+
+    CursorMode target_mode;
+    if (!focused) {
+        target_mode = CursorMode::Visible;
+    } else if (!in_menu) {
+        target_mode = CursorMode::GameplayLock;
+    } else if (gamepad) {
+        target_mode = CursorMode::MenuHidden;
+    } else {
+        target_mode = CursorMode::Visible;
+    }
+
+    const bool should_hide = (target_mode != CursorMode::Visible);
+    cursor_hidden.store(should_hide, std::memory_order_relaxed);
+
+    if (target_mode == current_cursor_mode) return;
+    current_cursor_mode = target_mode;
+
+    switch (target_mode) {
+        case CursorMode::GameplayLock: {
             if (hwnd && IsWindow(hwnd)) {
                 while (ShowCursor(FALSE) >= 0) {}
                 SetCursor(nullptr);
             }
             std::lock_guard lock(mouse_mutex);
             dpad_steps.Reset();
+            menu_target = MenuTarget{};
             move_accum_x = 0;
             move_accum_y = 0;
             POINT center{};
@@ -349,9 +377,27 @@ void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
             } else {
                 has_cursor_pos = false;
             }
+            break;
         }
-    } else {
-        if (was_hidden) {
+        case CursorMode::MenuHidden: {
+            if (hwnd && IsWindow(hwnd)) {
+                ClipCursor(nullptr);
+                while (ShowCursor(FALSE) >= 0) {}
+                SetCursor(nullptr);
+            } else {
+                ClipCursor(nullptr);
+            }
+            std::lock_guard lock(mouse_mutex);
+            dpad_steps.Reset();
+            menu_target = MenuTarget{};
+            move_accum_x = 0;
+            move_accum_y = 0;
+            look_dx = 0.0f;
+            look_dy = 0.0f;
+            has_cursor_pos = false;
+            break;
+        }
+        case CursorMode::Visible: {
             if (hwnd && IsWindow(hwnd)) {
                 ClipCursor(nullptr);
                 while (ShowCursor(TRUE) < 0) {}
@@ -363,7 +409,10 @@ void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
             look_dx = 0.0f;
             look_dy = 0.0f;
             has_cursor_pos = false;
+            break;
         }
+        default:
+            break;
     }
 }
 
@@ -428,6 +477,22 @@ void SetMenuModeForTest(int mode) {
 
 bool IsCursorHiddenForTest() {
     return cursor_hidden.load(std::memory_order_relaxed);
+}
+
+void SetGamepadDetected(bool detected) {
+    const bool prev = gamepad_detected.exchange(detected, std::memory_order_relaxed);
+    if (prev != detected) {
+        HWND hwnd = game_hwnd.load(std::memory_order_relaxed);
+        if (hwnd && IsWindow(hwnd)) {
+            PostMessageW(hwnd, kSyncCursorMsg, static_cast<WPARAM>(IsInMenuState() ? 1 : 0), 0);
+        } else {
+            ApplyCursorVisibilityOnWindowThread(nullptr, IsInMenuState());
+        }
+    }
+}
+
+bool IsGamepadDetected() {
+    return gamepad_detected.load(std::memory_order_relaxed);
 }
 
 bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t* result) {
@@ -516,31 +581,37 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
             std::lock_guard lock(mouse_mutex);
             // In menus, the click selects the slot under the cursor; off every slot it does nothing, and where the
             // highlight cannot be read (a dialog) it is the A button
-            if (in_menu && HighlightedSlot()) {
-                if (auto slot = SlotAt(GET_X_LPARAM(lp), GET_Y_LPARAM(lp), client_w, client_h)) SetMenuTarget(*slot, true);
-                break;
+            if (in_menu) {
+                if (gamepad_detected.load(std::memory_order_relaxed)) break;
+                if (HighlightedSlot()) {
+                    if (auto slot = SlotAt(GET_X_LPARAM(lp), GET_Y_LPARAM(lp), client_w, client_h)) SetMenuTarget(*slot, true);
+                    break;
+                }
             }
             mouse_left.Press();
             break;
         }
         case WM_LBUTTONUP: {
+            if (in_menu && gamepad_detected.load(std::memory_order_relaxed)) break;
             std::lock_guard lock(mouse_mutex);
             mouse_left.Release();
             break;
         }
         case WM_RBUTTONDOWN:
         case WM_RBUTTONDBLCLK: {
+            if (in_menu && gamepad_detected.load(std::memory_order_relaxed)) break;
             std::lock_guard lock(mouse_mutex);
             mouse_right.Press();
             break;
         }
         case WM_RBUTTONUP: {
+            if (in_menu && gamepad_detected.load(std::memory_order_relaxed)) break;
             std::lock_guard lock(mouse_mutex);
             mouse_right.Release();
             break;
         }
         case WM_MOUSEWHEEL: {
-            if (!in_menu) break;
+            if (!in_menu || gamepad_detected.load(std::memory_order_relaxed)) break;
             std::lock_guard lock(mouse_mutex);
             menu_target.active = false;
             wheel_v_accum += GET_WHEEL_DELTA_WPARAM(wp);
@@ -559,7 +630,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
             break;
         }
         case WM_MOUSEHWHEEL: {
-            if (!in_menu) break;
+            if (!in_menu || gamepad_detected.load(std::memory_order_relaxed)) break;
             std::lock_guard lock(mouse_mutex);
             wheel_h_accum += GET_WHEEL_DELTA_WPARAM(wp);
             while (wheel_h_accum >= WHEEL_DELTA) {
@@ -589,6 +660,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
             if (dx == 0 && dy == 0) break;
 
             if (in_menu) {
+                if (gamepad_detected.load(std::memory_order_relaxed)) break;
                 // hovering highlights the slot under the cursor, within the tabs or within the list
                 if (HighlightedSlot()) {
                     if (auto slot = SlotAt(x, y, client_w, client_h); slot && !(menu_target.active && menu_target.press))
@@ -626,6 +698,8 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
 
 void KeyboardPad(int port, input::Pad& pad) {
     if (port != 0) return;
+    const bool physical_connected = pad.connected;
+    SetGamepadDetected(physical_connected);
     pad.connected = true;
 
     const bool in_menu = IsInMenuState();
@@ -686,11 +760,13 @@ void KeyboardPad(int port, input::Pad& pad) {
             // Right Click = Button B (Back)
             // Delete = Button X (Delete)
             // Mouse Wheel & Cursor Move = D-Pad navigation
-            StepTowardTarget(now);
-            if (left_pressed || mouse_left.Sample(now)) pad.analog[0] = 255;
-            if (right_pressed || mouse_right.Sample(now)) pad.analog[1] = 255;
-            if (Down(VK_DELETE)) pad.analog[2] = 255;
-            pad.buttons |= dpad_steps.Sample(now);
+            if (!gamepad_detected.load(std::memory_order_relaxed)) {
+                StepTowardTarget(now);
+                if (left_pressed || mouse_left.Sample(now)) pad.analog[0] = 255;
+                if (right_pressed || mouse_right.Sample(now)) pad.analog[1] = 255;
+                if (Down(VK_DELETE)) pad.analog[2] = 255;
+                pad.buttons |= dpad_steps.Sample(now);
+            }
             look_dx = 0.0f;
             look_dy = 0.0f;
             has_raw_delta = false;

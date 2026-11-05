@@ -39,7 +39,9 @@ void OnInit() {
 void OnImageLoaded() {
     hulk::KeepCameraInvert();  // Camera Options' Invert X/Y as the player set them, not inverted at first
     // button prompts: a controller's when one is plugged in, before the game reads its strings
-    ApplyPrompts(SDL_HasGamepad());
+    const bool has_pad = SDL_HasGamepad();
+    ApplyPrompts(has_pad);
+    hulk::SetGamepadDetected(has_pad);
 }
 
 void OnWindowReady(void* hwnd) {
@@ -49,7 +51,10 @@ void OnWindowReady(void* hwnd) {
 void OnPad(int port, input::Pad& pad) {
     hulk::TickDisplaySettings();
     hulk::KeepCameraInvert();
-    if (port == 0) ApplyPrompts(pad.connected);  // a physical controller; keyboard input joins after
+    if (port == 0) {
+        ApplyPrompts(pad.connected);  // a physical controller; keyboard input joins after
+        hulk::SetGamepadDetected(pad.connected);
+    }
     hulk::KeyboardPad(port, pad);
 }
 
