@@ -63,6 +63,8 @@ Verified runtime milestones:
 
 Known limits and remaining validation:
 
+- Issue #10 (2026-11-06, v0.4.4): fixes DX12 shader-visible descriptor lifetime and adds DX11/DX12 device-failure diagnostics; see `reports/issue-10.md`. Forced-rollover GPU tests and a 20-minute tutorial soak pass. Frantic Recovery's initial truck chase did not reproduce the flying vehicle at measured 60 or 120 fps; its physics remain unchanged. The transport bug and the reporter's exact blackout cause remain unconfirmed; shield/grab/delivery and USA runtime are untested.
+
 - Saving is disabled by the game during the opening tutorial mission; full campaign save/load cycles after completing the opening mission remain to be validated in gameplay.
 - The symbol summary still lists 50 unresolved/absent library symbols (including DirectSound exports running their original Xbox code).
 - Audio starts prebuffered, but occasional starvation/queue growth (up to 100 ms) still occurs under load; listening quality remains unverified.

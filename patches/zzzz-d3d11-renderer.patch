@@ -92,10 +92,9 @@ index 5178584..d9e7f6c 100644
      }
 diff --git a/runtime/gpu/d3d11.cpp b/runtime/gpu/d3d11.cpp
 new file mode 100644
-index 0000000..59d1e72
 --- /dev/null
 +++ b/runtime/gpu/d3d11.cpp
-@@ -0,0 +1,2976 @@
+@@ -0,0 +1,2983 @@
 +// The title's Direct3D 8 calls drawn with Direct3D 11: the renderer for graphics cards and drivers without Direct3D 12
 +// (d3d8.cpp falls back to it, XBE_RENDERER=d3d11 asks for it). It follows d3d12.cpp step for step with the same
 +// shaders; what Direct3D 11 does for it (resource states, descriptor heaps, upload rings, fences) drops out, and what
@@ -124,6 +123,7 @@ index 0000000..59d1e72
 +#include <filesystem>
 +#include <mutex>
 +#include <optional>
++#include <stdexcept>
 +#include <unordered_map>
 +#include <unordered_set>
 +
@@ -2850,7 +2850,13 @@ index 0000000..59d1e72
 +    DeliverReports();
 +    bool vsync = app::Get().vsync;
 +    auto perf_swap = PerfClock::now();
-+    swap_->Present(vsync ? 1 : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0);
++    const HRESULT presented = swap_->Present(vsync ? 1 : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0);
++    if (FAILED(presented)) {
++        LOGE("d3d11: present failed: %08lX; device removed reason %08lX",
++             static_cast<unsigned long>(presented), static_cast<unsigned long>(dev_->GetDeviceRemovedReason()));
++        logx::Flush();
++        throw std::runtime_error("Direct3D 11 present failed; see the runtime log");
++    }
 +    g_perf.swap += PerfMs(perf_swap);
 +    // the flip model unbinds the back buffer
 +    bound_rt_ = bound_ds_ = nullptr;

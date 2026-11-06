@@ -1,0 +1,194 @@
+diff --git a/runtime/gpu/d3d12.cpp b/runtime/gpu/d3d12.cpp
+index d49be1c..f93cdbc 100644
+--- a/runtime/gpu/d3d12.cpp
++++ b/runtime/gpu/d3d12.cpp
+@@ -17,11 +17,13 @@
+ #include <chrono>
+ #include <cmath>
+ #include <cstdio>
++#include <cstdlib>
+ #include <cstring>
+ #include <deque>
+ #include <filesystem>
+ #include <mutex>
+ #include <optional>
++#include <stdexcept>
+ #include <unordered_map>
+ #include <unordered_set>
+ 
+@@ -51,8 +53,9 @@ constexpr uint64_t kStaleFrames = 8;  // frames a target may go unused and still
+ constexpr uint64_t kUploadSize = 64ull << 20;
+ // a draw starting with less than this left in the frame's ring waits for the GPU and starts the ring over
+ constexpr uint64_t kUploadReserve = 8ull << 20;
+-constexpr uint32_t kSrvCount = 3 * 32768;
+-constexpr uint32_t kSamplerCount = 2048;
++// Diagnostic mode exercises heap exhaustion in short tutorial runs, on the real GPU.
++const uint32_t kSrvCount = std::getenv("XBE_D3D12_DESCRIPTOR_STRESS") ? 3 * 64 : 3 * 32768;
++const uint32_t kSamplerCount = std::getenv("XBE_D3D12_DESCRIPTOR_STRESS") ? 32 : 2048;
+ constexpr uint32_t kRtvCount = 1024;
+ constexpr uint32_t kDsvCount = 256;
+ constexpr DXGI_FORMAT kBgra = DXGI_FORMAT_B8G8R8A8_UNORM;
+@@ -490,6 +493,8 @@ private:
+         uint64_t used = 0;
+         uint64_t fence = 0;
+         std::vector<ComPtr<ID3D12Resource>> garbage;
++        // Shader-visible descriptors remain GPU-owned until this frame's fence completes.
++        std::vector<ComPtr<ID3D12DescriptorHeap>> old_heaps;
+         uint32_t srv = 0;
+     };
+     struct Alloc {
+@@ -502,6 +507,7 @@ private:
+     Alloc Upload(uint64_t size, uint64_t align = 256);
+     Frame& CurrentFrame() { return frames_[frame_ % kFrames]; }
+     uint32_t AllocSrvSlots(uint32_t n);
++    void ReplaceShaderHeap(ComPtr<ID3D12DescriptorHeap>& heap);
+     D3D12_CPU_DESCRIPTOR_HANDLE Cpu(ID3D12DescriptorHeap* h, uint32_t i, uint32_t inc) {
+         auto c = h->GetCPUDescriptorHandleForHeapStart();
+         c.ptr += size_t(i) * inc;
+@@ -516,6 +522,7 @@ private:
+     void Begin();
+     void Submit(bool wait);
+     void WaitFence(uint64_t value);
++    void CheckGpu(HRESULT result, const char* operation);
+     void SetFullViewport(uint32_t w, uint32_t h);
+     void SetBlitTarget(D3D12_CPU_DESCRIPTOR_HANDLE rtv, uint32_t w, uint32_t h);
+     void Blit(ID3D12Resource* src, DXGI_FORMAT fmt, const float uvrect[4], bool gamma, bool alpha, uint32_t taps = 1,
+@@ -977,16 +984,17 @@ void D3D12Backend::Begin() {
+ void D3D12Backend::Submit(bool wait) {
+     last_vsc_gpu_ = 0;
+     last_dc_gpu_ = 0;
+-    cl_->Close();
++    CheckGpu(cl_->Close(), "close command list");
+     ID3D12CommandList* lists[] = {cl_.Get()};
+     queue_->ExecuteCommandLists(1, lists);
+-    queue_->Signal(fence_.Get(), ++fence_value_);
++    CheckGpu(queue_->Signal(fence_.Get(), ++fence_value_), "signal fence");
+     Frame& f = CurrentFrame();
+     f.fence = fence_value_;
+     if (wait) {
+         WaitFence(fence_value_);
+         f.alloc->Reset();
+         f.garbage.clear();
++        f.old_heaps.clear();
+         f.used = 0;
+         f.srv = 0;
+         view_sets_.clear();
+@@ -998,8 +1006,20 @@ void D3D12Backend::Submit(bool wait) {
+ void D3D12Backend::Flush() { Submit(true); }
+ 
+ void D3D12Backend::WaitFence(uint64_t value) {
+-    fence_->SetEventOnCompletion(value, event_);
+-    WaitForSingleObject(event_, INFINITE);
++    CheckGpu(dev_->GetDeviceRemovedReason(), "wait for fence");
++    CheckGpu(fence_->SetEventOnCompletion(value, event_), "set fence event");
++    const DWORD result = WaitForSingleObject(event_, INFINITE);
++    CheckGpu(result == WAIT_OBJECT_0 ? S_OK : HRESULT_FROM_WIN32(GetLastError()), "wait for fence event");
++    // A removed device signals fences too. It must not be treated as finished GPU work.
++    CheckGpu(dev_->GetDeviceRemovedReason(), "fence completion");
++}
++
++void D3D12Backend::CheckGpu(HRESULT result, const char* operation) {
++    if (SUCCEEDED(result)) return;
++    LOGE("d3d12: %s failed: %08lX; device removed reason %08lX", operation,
++         static_cast<unsigned long>(result), static_cast<unsigned long>(dev_->GetDeviceRemovedReason()));
++    logx::Flush();
++    throw std::runtime_error("Direct3D 12 operation failed; see the runtime log");
+ }
+ 
+ void D3D12Backend::SetFullViewport(uint32_t w, uint32_t h) {
+@@ -1043,7 +1063,7 @@ uint32_t D3D12Backend::AllocSrvSlots(uint32_t n) {
+     Frame& f = CurrentFrame();
+     const uint32_t per = kSrvCount / kFrames;
+     if (f.srv + n > per) {
+-        LOG_FIRST(4, "d3d12: descriptor ring wrapped within a frame");
++        ReplaceShaderHeap(srv_heap_);
+         f.srv = 0;
+         view_sets_.clear();
+     }
+@@ -1052,6 +1072,26 @@ uint32_t D3D12Backend::AllocSrvSlots(uint32_t n) {
+     return i;
+ }
+ 
++void D3D12Backend::ReplaceShaderHeap(ComPtr<ID3D12DescriptorHeap>& heap) {
++    // Never rewrite a shader-visible heap that submitted or recorded draws still read.
++    // Retain the old heap with this frame; its fence also covers earlier queue submissions.
++    const auto desc = heap->GetDesc();
++    ComPtr<ID3D12DescriptorHeap> next;
++    if (FAILED(dev_->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&next)))) {
++        LOGE("d3d12: could not replace descriptor heap");
++        throw std::runtime_error("D3D12 descriptor heap allocation failed");
++    }
++    CurrentFrame().old_heaps.push_back(heap);
++    heap = std::move(next);
++    ID3D12DescriptorHeap* heaps[] = {srv_heap_.Get(), smp_heap_.Get()};
++    cl_->SetDescriptorHeaps(2, heaps);
++    // SetDescriptorHeaps invalidates both root descriptor tables, even if one heap stayed.
++    binds_.views = binds_.samplers = UINT32_MAX;
++    LOG_FIRST(16, "d3d12: retired %s descriptor heap at frame %llu",
++              desc.Type == D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER ? "sampler" : "SRV",
++              (unsigned long long)presents_);
++}
++
+ void D3D12Backend::Transition(ID3D12Resource* r, D3D12_RESOURCE_STATES& cur, D3D12_RESOURCE_STATES want) {
+     if (cur == want) return;
+     D3D12_RESOURCE_BARRIER b{};
+@@ -1360,6 +1400,7 @@ uint32_t D3D12Backend::EnsureBlitSamplers() {
+     uint32_t si;
+     if (it == samplers_.end()) {
+         if (smp_used_ + 4 > kSamplerCount) {
++            ReplaceShaderHeap(smp_heap_);
+             samplers_.clear();
+             smp_used_ = 0;
+         }
+@@ -1382,13 +1423,14 @@ uint32_t D3D12Backend::EnsureBlitSamplers() {
+ // the full screen triangle: cb at b0 and b1, views at srv_slot; without a sampler slot EnsureBlitSamplers gives it
+ void D3D12Backend::DrawFullScreen(ID3D12PipelineState* pso, D3D12_GPU_VIRTUAL_ADDRESS cb, uint32_t srv_slot,
+                                   std::optional<uint32_t> sampler_slot) {
++    // Allocation can replace a heap and invalidate root tables. Allocate before binding either.
++    uint32_t si = sampler_slot ? *sampler_slot : EnsureBlitSamplers();
+     binds_ = {};
+     cl_->SetPipelineState(pso);
+     cl_->SetGraphicsRootConstantBufferView(0, cb);
+     cl_->SetGraphicsRootConstantBufferView(1, cb);
+     cl_->SetGraphicsRootDescriptorTable(2, Gpu(srv_heap_.Get(), srv_slot, srv_inc_));
+     // without a slot the passes take the blit samplers, looked up at this point as they always were
+-    uint32_t si = sampler_slot ? *sampler_slot : EnsureBlitSamplers();
+     cl_->SetGraphicsRootDescriptorTable(3, Gpu(smp_heap_.Get(), si, smp_inc_));
+     cl_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+     cl_->DrawInstanced(3, 1, 0, 0);
+@@ -1990,6 +2032,7 @@ uint32_t D3D12Backend::EnsureStageSamplers(const State& s, const DrawTextures& s
+     auto it = samplers_.find(key);
+     if (it != samplers_.end()) return it->second;
+     if (smp_used_ + 4 > kSamplerCount) {
++        ReplaceShaderHeap(smp_heap_);
+         samplers_.clear();
+         smp_used_ = 0;
+     }
+@@ -2568,9 +2611,9 @@ void D3D12Backend::SetTextureViewsAndSamplers(const State& s, const Assembled& a
+         stages.sv[i].Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+     }
+     uint32_t views = EnsureViewSet(stages);
++    uint32_t samplers = EnsureStageSamplers(s, stages, AnyStageWraps(s) && UnitTexcoords(a));
+     if (views != binds_.views) cl_->SetGraphicsRootDescriptorTable(2, Gpu(srv_heap_.Get(), views, srv_inc_));
+     binds_.views = views;
+-    uint32_t samplers = EnsureStageSamplers(s, stages, AnyStageWraps(s) && UnitTexcoords(a));
+     if (samplers != binds_.samplers) cl_->SetGraphicsRootDescriptorTable(3, Gpu(smp_heap_.Get(), samplers, smp_inc_));
+     binds_.samplers = samplers;
+ }
+@@ -3218,6 +3261,7 @@ void D3D12Backend::ResetFrame() {
+     }
+     f.alloc->Reset();
+     f.garbage.clear();
++    f.old_heaps.clear();
+     f.used = 0;
+     f.srv = 0;
+     cl_->Reset(f.alloc.Get(), nullptr);
+@@ -3292,7 +3336,7 @@ void D3D12Backend::Present(const Surface& front) {
+     DeliverReports();
+     bool vsync = app::Get().vsync;
+     auto perf_swap = PerfClock::now();
+-    swap_->Present(vsync ? 1 : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0);
++    CheckGpu(swap_->Present(vsync ? 1 : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0), "present");
+     g_perf.swap += PerfMs(perf_swap);
+ 
+     presents_++;
