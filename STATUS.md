@@ -1,5 +1,7 @@
 # Hulk Recompiled - work in progress
 
+v0.4.5 issue #10 update (2026-11-06): focused display/system keepawake and display-power logging are implemented in a new SDK patch. Active world simulation now runs through a bounded 60 Hz accumulator independently of rendering. The truck's close-approach rise reproduced with legacy timing and stayed near road height in fixed-timing 60/120/144-cap tests. Both regions build; five CTests and a 195-second EU/DX12 tutorial smoke pass. See [the implementation and test report](https://github.com/lookingcoding/hulk-ultimate-destruction-recomp-xbox-ver-/blob/main/reports/issue-10-local-fix.md) for measured FPS, scope and limits. Shield break/pickup/delivery, USA gameplay, full campaign and Frost's blackout are not confirmed fixed by these tests. Motion interpolation is not implemented.
+
 This is a native Windows port project for the original Xbox version of The Incredible Hulk: Ultimate Destruction. It is an experimental playable build validated through the opening junkyard tutorial, not yet a verified full-campaign port.
 
 Verified input:

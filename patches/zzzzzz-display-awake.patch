@@ -1,0 +1,99 @@
+diff --git a/runtime/app/main.cpp b/runtime/app/main.cpp
+index 7fd948a..b096674 100644
+--- a/runtime/app/main.cpp
++++ b/runtime/app/main.cpp
+@@ -13,6 +13,7 @@
+ #include <chrono>
+ #include <csignal>
+ #include <cwchar>
++#include <cstring>
+ #include <thread>
+ 
+ #include <imgui.h>
+@@ -35,6 +36,22 @@ HWND g_hwnd = nullptr;
+ constexpr UINT kApplyDisplay = WM_APP + 1, kOpenWindow = WM_APP + 2;
+ bool g_mode_changed = false;
+ bool g_apply_posted = false;  // a display apply is waiting in the queue or running
++bool g_display_required = false;
++bool g_window_active = false, g_window_visible = false, g_window_minimized = false;
++HPOWERNOTIFY g_display_notification = nullptr;
++constexpr GUID kConsoleDisplayState{0x6fe69556, 0x704a, 0x47a0, {0x8f, 0x24, 0xc2, 0x8d, 0x93, 0x6f, 0xda, 0x47}};
++
++// Window-thread owned: controller polling/rendering need not reset Windows' display idle timer.
++// Never alter the user's power plan, or retain the request after leaving the game.
++void RequireDisplay(bool active) {
++    if (active == g_display_required) return;
++    if (!SetThreadExecutionState(ES_CONTINUOUS | (active ? ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED : 0))) {
++        LOGE("power: display-required %s failed (%lu)", active ? "on" : "off", GetLastError());
++        return;
++    }
++    g_display_required = active;
++    LOGR("power: display-required %s", active ? "on" : "off");
++}
+ 
+ // crash dump in CrashDumps beside the exe
+ LONG WINAPI WriteCrashDump(EXCEPTION_POINTERS* e) {
+@@ -120,6 +137,37 @@ void ApplyNow() {
+ }
+ 
+ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
++    // Observe lifecycle events before UI/game handlers can consume them.
++    if (msg == WM_ACTIVATE) {
++        LOGR("display: activation %s minimized=%u", LOWORD(wp) == WA_INACTIVE ? "inactive" : "active", HIWORD(wp));
++        g_window_active = LOWORD(wp) != WA_INACTIVE;
++        g_window_minimized = HIWORD(wp) != 0;
++        RequireDisplay(g_window_active && g_window_visible && !g_window_minimized);
++    } else if (msg == WM_SHOWWINDOW) {
++        // WM_SHOWWINDOW precedes the visible-style update; track the notification, not IsWindowVisible.
++        g_window_visible = wp != 0;
++        RequireDisplay(g_window_active && g_window_visible && !g_window_minimized);
++    } else if (msg == WM_SIZE) {
++        g_window_minimized = wp == SIZE_MINIMIZED;
++        RequireDisplay(g_window_active && g_window_visible && !g_window_minimized);
++    } else if (msg == WM_DISPLAYCHANGE) {
++        LOGR("display: mode changed %ux%u %u bpp", LOWORD(lp), HIWORD(lp), unsigned(wp));
++    } else if (msg == WM_POWERBROADCAST) {
++        if (wp == PBT_POWERSETTINGCHANGE && lp) {
++            const auto* setting = reinterpret_cast<const POWERBROADCAST_SETTING*>(lp);
++            if (IsEqualGUID(setting->PowerSetting, kConsoleDisplayState) && setting->DataLength == sizeof(DWORD)) {
++                DWORD state;
++                std::memcpy(&state, setting->Data, sizeof(state));
++                LOGR("power: console display %s (%lu)", state == 0 ? "off" : state == 1 ? "on" : state == 2 ? "dim" : "unknown", state);
++            }
++        } else {
++            LOGR("power: broadcast %llu", static_cast<unsigned long long>(wp));
++        }
++    } else if (msg == WM_DESTROY) {
++        RequireDisplay(false);
++        if (g_display_notification) UnregisterPowerSettingNotification(g_display_notification);
++        g_display_notification = nullptr;
++    }
+     {
+         std::lock_guard lock(UiLock());
+         if (ImGui::GetCurrentContext() && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp)) return 1;
+@@ -273,6 +323,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
+     RegisterClassExW(&wc);
+     app::g_hwnd = CreateWindowExW(0, wc.lpszClassName, app::kGame.title, WS_POPUP, 0, 0, 1280, 720,
+                                   nullptr, nullptr, inst, nullptr);
++    app::g_display_notification = RegisterPowerSettingNotification(app::g_hwnd, &app::kConsoleDisplayState,
++                                                                  DEVICE_NOTIFY_WINDOW_HANDLE);
++    if (!app::g_display_notification) LOGE("power: display notification registration failed (%lu)", GetLastError());
+     // behind a splash the window stays hidden until the game's first frame; handed over, it is set up hidden
+     if (handover) {
+         app::ApplyNow();
+@@ -294,6 +347,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
+     if (app::Instance())
+         SetWindowTextW(app::g_hwnd, (std::wstring(app::kGame.title) + L" [" + std::to_wstring(app::Instance()) + L"]").c_str());
+     if (!kernel::Boot(std::move(game.xbe), IMAGE_XBE, game.dir.string(), (app::ExeDir() / hdd).string())) {
++        app::RequireDisplay(false);
+         MessageBoxW(app::g_hwnd, L"The game failed to start, see the log in the logs folder.", app::kGame.short_title,
+                     MB_ICONERROR);
+         return 1;
+@@ -305,6 +359,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
+         DispatchMessageW(&msg);
+     }
+     if (app::g_mode_changed) ChangeDisplaySettingsW(nullptr, 0);
++    app::RequireDisplay(false);
+     logx::Flush();
+     kernel::Shutdown(0);
+ }

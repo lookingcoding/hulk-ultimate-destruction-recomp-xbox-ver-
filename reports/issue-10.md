@@ -1,5 +1,7 @@
 # Issue #10: transport vehicle and display timeouts
 
+The subsequent 144 fps investigation is documented in [issue-10-144-fps.md](issue-10-144-fps.md).
+
 Investigation, 2026-11-06. The user subsequently authorized publishing the renderer fix as v0.4.4 and a short issue reply. The transport bug remains open; no vehicle physics were changed.
 
 ## Release comparison (seen)
@@ -48,3 +50,5 @@ Laptop: Intel UHD Graphics, driver `32.0.101.6129`, Windows 11 Education 24H2, i
 - Not established: the transport's failure mechanism, successful shield damage/grab/delivery, whole mission completion, the reporter's exact blackout cause, GPU reset recovery, USA runtime behavior, other GPUs/drivers, or full campaign stability. No gameplay workaround is represented as a confirmed transport fix.
 
 Artifacts and reproducible local scripts are under `D:\Projects\Build Cache\Hulk Recompiled\scratch\issue10*`. `issue10-run.ps1` drives the tutorial soak/stress runs; `issue10-vehicle-run.ps1` drives direct mission runs with `-Cap`, `-Renderer`, and `-Seconds`. `issue10-lua.py` reads the disc's float-number Lua chunks for static inspection. `issue10-verify.py` checks clean patch application and summarizes telemetry. `issue10-artifacts.json` inventories exact output paths without traversing the assets junctions. `issue10-vehicle-results.json` contains the measured vehicle samples' summary. The published release archive and user-facing standalone installation are unchanged; the development build in the build cache has been updated.
+
+Local implementation follow-up (not published): [issue-10-local-fix.md](issue-10-local-fix.md) records focused display-awake requests/power diagnostics, a 60 Hz world simulation accumulator, native legacy/fixed A/B evidence and the remaining stage/hardware limits.
