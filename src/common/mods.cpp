@@ -128,9 +128,12 @@ std::optional<Stage> PatchArchive(const std::string& path, uint64_t size, const 
     if (placed.empty()) return std::nullopt;
     uint64_t total = placed.back().at + placed.back().file->size;
     auto dir = std::make_shared<std::vector<uint8_t>>(std::move(rcf->dir));
+    auto names = std::make_shared<std::vector<uint8_t>>(std::move(rcf->names));
     uint64_t dir_at = rcf->dir_at;
-    return Stage{total, [dir, dir_at, placed](uint64_t at, uint8_t* dst, size_t n) {
+    uint64_t names_at = rcf->names_at;
+    return Stage{total, [dir, dir_at, names, names_at, placed](uint64_t at, uint8_t* dst, size_t n) {
                      Overlay(at, dst, n, dir_at, dir->data(), dir->size());
+                     Overlay(at, dst, n, names_at, names->data(), names->size());
                      for (const Placed& p : placed) {
                          uint64_t lo = std::max(at, p.at), hi = std::min<uint64_t>(at + n, p.at + p.file->size);
                          if (lo < hi) ReadHost(p.file->host, lo - p.at, dst + (lo - at), size_t(hi - lo));

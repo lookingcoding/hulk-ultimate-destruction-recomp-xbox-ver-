@@ -109,6 +109,32 @@ int main() {
     hulk::KeyboardPad(0, pad);
     if (!Check(pad.buttons == 0 && pad.analog[0] == 0, "Mouse menu navigation was not ignored while gamepad detected")) return 1;
 
+    hulk::KeyboardMessage(nullptr, WM_KEYDOWN, VK_DELETE, 0, nullptr);
+    pad = {}; pad.connected = true; pad.analog[1] = 123; pad.buttons = 0x04;
+    hulk::KeyboardPad(0, pad);
+    if (!Check(pad.analog[2] == 255 && pad.analog[1] == 123 && pad.buttons == 0x04,
+               "Delete with controller must produce only X and preserve controller inputs")) return 1;
+    hulk::KeyboardMessage(nullptr, WM_KEYUP, VK_DELETE, 0, nullptr);
+    pad = {}; pad.connected = true; pad.analog[2] = 200;
+    hulk::KeyboardPad(0, pad);
+    if (!Check(pad.analog[2] == 200, "Delete release erased physical controller X")) return 1;
+    pad = {}; pad.connected = true;
+    hulk::KeyboardPad(0, pad);
+    if (!Check(pad.analog[2] == 0, "Delete release left a duplicate or held X action")) return 1;
+    hulk::KeyboardMessage(nullptr, WM_KEYDOWN, VK_DELETE, 0, nullptr);
+    hulk::KeyboardMessage(nullptr, WM_KILLFOCUS, 0, 0, nullptr);
+    hulk::KeyboardMessage(nullptr, WM_SETFOCUS, 0, 0, nullptr);
+    pad = {}; pad.connected = true;
+    hulk::KeyboardPad(0, pad);
+    if (!Check(pad.analog[2] == 0, "Delete survived focus loss with a controller attached")) return 1;
+    hulk::SetMenuModeForTest(-1);
+    hulk::KeyboardMessage(nullptr, WM_KEYDOWN, VK_DELETE, 0, nullptr);
+    pad = {}; pad.connected = true;
+    hulk::KeyboardPad(0, pad);
+    if (!Check(pad.analog[2] == 0, "menu Delete binding became a gameplay attack")) return 1;
+    hulk::KeyboardMessage(nullptr, WM_KEYUP, VK_DELETE, 0, nullptr);
+    hulk::SetMenuModeForTest(1);
+
     // Disconnecting the controller in menu mode restores cursor visibility for mouse/keyboard
     pad = {}; pad.connected = false;
     hulk::KeyboardPad(0, pad);

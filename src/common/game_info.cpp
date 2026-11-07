@@ -2,6 +2,7 @@
 #include "common/addresses.h"
 #include "common/camera.h"
 #include "common/diagnostics.h"
+#include "common/replay.h"
 #include "common/display_menu.h"
 #include "common/keyboard.h"
 #include "common/mods.h"
@@ -32,23 +33,30 @@ void ApplyPrompts(bool controller) {
 
 void OnInit() {
     hulk::InitDiagnostics();
-    hulk::RunMatchingRelease();  // the other release's game in assets: its own executable runs it
+    if (!hulk::InternalPadTestMode()) hulk::RunMatchingRelease();
     hulk::LoadMods();            // mods\ beside assets (mods.h)
 }
 
 void OnImageLoaded() {
     hulk::KeepCameraInvert();  // Camera Options' Invert X/Y as the player set them, not inverted at first
     // button prompts: a controller's when one is plugged in, before the game reads its strings
+    if (hulk::InternalPadTestMode()) { ApplyPrompts(true); return; }
     const bool has_pad = SDL_HasGamepad();
     ApplyPrompts(has_pad);
     hulk::SetGamepadDetected(has_pad);
 }
 
 void OnWindowReady(void* hwnd) {
+    if (hulk::InternalPadTestMode()) return;
     hulk::SetGameWindow(hwnd);
 }
 
 void OnPad(int port, input::Pad& pad) {
+    if (hulk::InternalPadTestMode()) {
+        pad = {}; pad.connected = port == 0;
+        hulk::ReplayPad(port, pad);
+        return;  // never enter KeyboardPad or its desktop cursor paths
+    }
     hulk::TickDisplaySettings();
     hulk::KeepCameraInvert();
     if (port == 0) {
@@ -59,6 +67,7 @@ void OnPad(int port, input::Pad& pad) {
 }
 
 bool OnMessage(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t* result) {
+    if (hulk::InternalPadTestMode()) return false;  // no KeyboardMessage/cursor/wheel actions in this fixture
     // the mouse wheel in play: the camera closer (up) or farther (down), gliding a kCameraZoomStep a notch (view.h)
     constexpr uint32_t kMouseWheel = 0x020A;
     constexpr int kWheelDelta = 120;
@@ -76,6 +85,7 @@ bool OnMessage(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t
 
 // What the runtime asks of the game; strings must be set, hooks may stay null
 const app::GameInfo app::kGame = {
+    .background_test = hulk::InternalPadTestMode,
     .title = L"The Incredible Hulk: Ultimate Destruction",               // window and splash
     .short_title = L"Hulk Recompiled",               // message boxes
     .name = L"Hulk Recompiled",                      // window classes, crash dumps, handover event

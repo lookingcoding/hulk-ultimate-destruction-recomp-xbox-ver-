@@ -63,10 +63,16 @@ X86_FUNC(sub_00026C30) {
     static const bool enabled = std::getenv("HULK_TEST_VEHICLES") != nullptr;
     const uint32_t out = X86_MEM32(ctx.esp + 4);
     const uint32_t name = X86_MEM32(ctx.esp + 8);
+    // Test scripts can include mission/prop state in a diagnostic query for a nonexistent actor.
+    // Keep the original lookup/zero-vector result; this only adds logging when diagnostics are on.
+    constexpr char marker[] = "__hulk_test_truck:";
+    const bool mission_trace = enabled && name &&
+        std::strncmp(reinterpret_cast<const char*>(base + name), marker, sizeof(marker) - 1) == 0;
+    if (mission_trace) LOGI("mission test: %s", reinterpret_cast<const char*>(base + name) + sizeof(marker) - 1);
     querying_truck = enabled && name && std::strstr(reinterpret_cast<const char*>(base + name), "division_truck_c3m3");
     __imp__sub_00026C30(ctx, base);
     querying_truck = false;
-    if (!enabled || !out || !name) return;
+    if (!enabled || !out || !name || mission_trace) return;
     const char* actor = reinterpret_cast<const char*>(base + name);
     if (!std::strstr(actor, "truck") && !std::strstr(actor, "Truck")) return;
     using Clock = std::chrono::steady_clock;

@@ -6,16 +6,23 @@
 #include <iterator>
 #include <string>
 #include <vector>
+#include <chrono>
+#include <thread>
+#include <filesystem>
 #include "app/app.h"
 #include "common/display_menu.h"
 #include "common/language.h"
 #include "common/view.h"
+#include "common/rcf.h"
+#include "common/mods.h"
 #include "kernel/kernel.h"
 
 // Serve the real misc.rcf through the display menu's view and read it back as the game's cement library reader does.
 namespace app {
 static Settings settings;
 static int applied = 0, saved = 0;
+static std::filesystem::path test_exe_dir;
+std::filesystem::path ExeDir() { return test_exe_dir; }
 Settings& Get() { return settings; }
 void ApplyDisplay() { applied++; }
 void Save() { saved++; }
@@ -85,12 +92,116 @@ static std::string Utf16(const std::vector<uint8_t>& b) {
     return s;
 }
 
+static hulk::ReadFn Reader(const std::vector<uint8_t>& bytes) {
+    return [&bytes](uint64_t at, void* dst, size_t n) -> size_t {
+        if (at >= bytes.size()) return 0;
+        n = std::min<size_t>(n, bytes.size() - at);
+        std::memcpy(dst, bytes.data() + at, n);
+        return n;
+    };
+}
+static std::string Payload(const std::vector<uint8_t>& bytes, const hulk::Rcf& rcf, uint32_t entry) {
+    return {bytes.begin() + rcf.Offset(entry), bytes.begin() + rcf.Offset(entry) + rcf.Size(entry)};
+}
+static void WriteMetadata(std::vector<uint8_t>& bytes, const hulk::Rcf& rcf) {
+    std::memcpy(bytes.data() + rcf.dir_at, rcf.dir.data(), rcf.dir.size());
+    std::memcpy(bytes.data() + rcf.names_at, rcf.names.data(), rcf.names.size());
+}
+static std::vector<uint8_t> SmallArchive() {
+    std::vector<uint8_t> bytes(0xc00);
+    auto put = [&](size_t at, uint32_t value) { std::memcpy(bytes.data() + at, &value, 4); };
+    std::memcpy(bytes.data(), "ATG CORE CEMENT LIBRARY", 23);
+    put(0x24, 0x40); put(0x28, 36); put(0x2c, 0x100); put(0x38, 3);
+    // Directory/hash order differs from physical order: entries C,A,B; filename records A,B,C.
+    for (unsigned entry = 0; entry < 3; ++entry) {
+        put(0x40 + entry * 12, entry + 1);
+        put(0x44 + entry * 12, entry ? 0x700 + entry * 0x100 : 0xa00);
+        put(0x48 + entry * 12, 1);
+    }
+    bytes[0x800] = 'A'; bytes[0x900] = 'B'; bytes[0xa00] = 'C';
+    size_t pos = 0x108;
+    for (const char* name : {"a.bin", "b.bin", "c.bin"}) {
+        const auto len = uint32_t(std::strlen(name) + 1);
+        put(pos, 123); put(pos + 4, 0x800); put(pos + 12, len);
+        std::memcpy(bytes.data() + pos + 16, name, len);
+        pos += 16 + len + 3;
+    }
+    put(0x30, uint32_t(pos - 0x100));
+    return bytes;
+}
+static void CheckLogicalFiles(const std::vector<uint8_t>& bytes, const char* a, const char* b, const char* c) {
+    const auto rcf = hulk::ReadRcf(bytes.size(), Reader(bytes));
+    if (!Check(rcf.has_value(), "relocated archive reparses")) return;
+    const char* names[] = {"c.bin", "a.bin", "b.bin"};
+    const char* payloads[] = {c, a, b};
+    for (unsigned entry = 0; entry < 3; ++entry) {
+        const auto found = rcf->Find(names[entry]);
+        if (Check(found && *found == entry, "each filename keeps its original logical entry after relocation"))
+            Check(Payload(bytes, *rcf, *found) == payloads[entry], "each filename resolves to its own expected payload");
+    }
+}
+static void RelocationTests() {
+    auto bytes = SmallArchive();
+    const auto original = hulk::ReadRcf(bytes.size(), Reader(bytes));
+    if (!Check(original.has_value(), "original metadata parses")) return;
+    for (unsigned pass = 0; pass < 4; ++pass) {
+        auto rcf = hulk::ReadRcf(bytes.size(), Reader(bytes));
+        if (!Check(rcf.has_value(), "synthetic archive parses")) return;
+        const char* name = pass % 2 ? "b.bin" : "a.bin";
+        const uint32_t at = uint32_t(hulk::AlignRcf(bytes.size()));
+        bytes.resize(at + 1);
+        bytes[at] = pass % 2 ? 'B' : 'A';
+        rcf->Move(*rcf->Find(name), at, 1);
+        WriteMetadata(bytes, *rcf);
+        CheckLogicalFiles(bytes, "A", "B", "C");
+        const auto reparsed = hulk::ReadRcf(bytes.size(), Reader(bytes));
+        if (Check(reparsed.has_value(), "rewritten filename metadata parses")) {
+            Check(reparsed->names.size() == original->names.size() &&
+                      std::equal(reparsed->names.begin(), reparsed->names.begin() + 8, original->names.begin()),
+                  "filename table header and length stay unchanged");
+            for (const auto& file : reparsed->files) {
+                const auto old = std::find_if(original->files.begin(), original->files.end(),
+                                              [&](const auto& f) { return f.entry == file.entry; });
+                Check(old != original->files.end() && old->record == file.record,
+                      "each logical filename keeps its exact metadata and padding bytes");
+            }
+        }
+    }
+}
+static std::vector<uint8_t> ServeMods(const std::string& path, const std::vector<uint8_t>& original) {
+    auto view = hulk::ModFileView(path, original.size(), Reader(original));
+    if (!Check(view != nullptr, "mod archive gets a view")) return original;
+    std::vector<uint8_t> bytes(view->size);
+    std::memcpy(bytes.data(), original.data(), std::min(bytes.size(), original.size()));
+    view->read(0, bytes.data(), bytes.size());
+    return bytes;
+}
+static void ModLayerTests(const char* output) {
+    namespace fs = std::filesystem;
+    app::test_exe_dir = fs::path(output) / ("mod-rcf-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(app::test_exe_dir / "assets");
+    fs::create_directories(app::test_exe_dir / "mods/First");
+    fs::create_directories(app::test_exe_dir / "mods/Second");
+    std::ofstream(app::test_exe_dir / "mods/First/a.bin", std::ios::binary) << "firstA";
+    std::ofstream(app::test_exe_dir / "mods/Second/a.bin", std::ios::binary) << "newA";
+    std::ofstream(app::test_exe_dir / "mods/Second/b.bin", std::ios::binary) << "newB";
+    hulk::LoadMods();
+    auto bytes = SmallArchive();
+    for (int layer = 0; layer < 3; ++layer) {
+        bytes = ServeMods("D:\\art.rcf", bytes);
+        CheckLogicalFiles(bytes, "newA", "newB", "C");
+    }
+    std::printf("mod regression artifacts: %s\n", app::test_exe_dir.string().c_str());
+}
+
 int main(int argc, char** argv) {
+    RelocationTests();
+    if (argc > 2) ModLayerTests(argv[2]);
     const char* path = argc > 1 ? argv[1] : "assets/misc.rcf";
     std::ifstream in(path, std::ios::binary);
     if (!in) {
         std::printf("SKIP: %s is not here\n", path);
-        return 0;
+        return failures ? 1 : 0;
     }
     std::vector<uint8_t> own((std::istreambuf_iterator<char>(in)), {});
     auto read = [&](uint64_t at, void* dst, size_t n) -> size_t {
@@ -241,6 +352,56 @@ int main(int argc, char** argv) {
               again.find("AddNamedValueInt \"PCDisplayMode\" 2 \"PCDisplayModeChanged\"") != std::string::npos,
           "the script read again starts at the settings as they are");
     Check(again.size() == rcf.size(), "the archive keeps its size");
+
+    // The real misc archive also keeps all logical names after the display view relocates its files.
+    const auto original_names = hulk::ReadRcf(own.size(), Reader(own));
+    const auto moved_names = hulk::ReadRcf(after.size(), Reader(after));
+    if (Check(original_names && moved_names, "display archive can be reparsed by filename")) {
+        for (const auto& file : original_names->files) {
+            const auto found = moved_names->Find(file.name);
+            if (!Check(found && *found == file.entry, "display relocation keeps every filename's entry")) continue;
+            if (moved_names->Offset(*found) == original_names->Offset(file.entry))
+                Check(Payload(after, *moved_names, *found) == Payload(own, *original_names, file.entry),
+                      "unmodified logical files retain their payloads");
+        }
+    }
+    if (argc > 2 && original_names) {
+        const auto entry = original_names->Find("frontend\\fe_real.txt");
+        if (Check(entry.has_value(), "real frontend exists for mod/display stacking")) {
+            const auto mod = app::test_exe_dir / "mods/Second/frontend";
+            std::filesystem::create_directories(mod);
+            std::ofstream(mod / "fe_real.txt", std::ios::binary) << Payload(own, *original_names, *entry) << "\r\n# relocation marker\r\n";
+            hulk::LoadMods();
+            const auto bytes = ServeMods("D:\\misc.rcf", own);
+            const auto parsed = hulk::ReadRcf(bytes.size(), Reader(bytes));
+            if (Check(parsed.has_value(), "mod followed by display view reparses")) {
+                for (const auto& file : original_names->files)
+                    Check(parsed->Find(file.name) == std::optional<uint32_t>(file.entry), "stacked mod/display keeps every name association");
+                const auto text = Payload(bytes, *parsed, *entry);
+                Check(text.find("# relocation marker") != std::string::npos && text.find("AddScreen \"display_options\"") != std::string::npos,
+                      "relocated mod script and display menu both survive in the correct file");
+            }
+        }
+    }
+    auto settle = [] { std::this_thread::sleep_for(std::chrono::milliseconds(450)); hulk::TickDisplaySettings(); };
+    settle();
+    Check(app::applied == 1, "batched actual mode/resolution change applies once");
+    hulk::DisplayCallback(0x100, 0); settle();
+    Check(app::applied == 2, "enter fullscreen still applies its window geometry");
+    const int applies = app::applied, saves = app::saved;
+    for (const auto [owner, choice] : {std::pair{0x102u, 2u}, {0x103u, 1u}, {0x104u, 1u}}) {
+        hulk::DisplayCallback(owner, choice); settle();
+        Check(app::applied == applies, "FPS/vsync/scale-only change does not reset fullscreen");
+    }
+    Check(app::saved == saves + 3, "live rendering changes are still saved");
+    hulk::DisplayCallback(0x100, 2); hulk::DisplayCallback(0x100, 0); settle();
+    Check(app::applied == applies, "mode changed back before settling does not reset fullscreen");
+    hulk::DisplayCallback(0x101, 1); settle();
+    Check(app::applied == applies + 1, "actual fullscreen resolution change still applies");
+    hulk::DisplayCallback(0x101, 5); hulk::DisplayCallback(0x101, 1); settle();
+    Check(app::applied == applies + 1, "resolution changed back before settling does not reset again");
+    hulk::DisplayCallback(0x104, 1); settle();
+    Check(app::applied == applies + 1, "selecting unchanged live settings never resets the mode");
 
 
     // the view's arithmetic: degrees added to the game's horizontal field, the planes scaled

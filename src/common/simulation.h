@@ -20,4 +20,21 @@ public:
 private:
     double remainder_ = 0;
 };
+
+struct SimulationSteps { unsigned count = 0; float elapsed = 0; };
+class WorldSimulationClock {
+public:
+    void Reset() { active_.Reset(); paused_.Reset(); }
+    SimulationSteps Advance(float elapsed, float wall_elapsed) {
+        if (!std::isfinite(elapsed) || elapsed < 0) { Reset(); return {}; }
+        // Paused cinematics still need controller/camera housekeeping. Schedule those calls by
+        // real time at 60 Hz, with ZERO simulation delta, rather than per render or not at all.
+        // Keep the two fractional budgets across mode changes. Otherwise alternating sub-tick
+        // active/zero frames discard every slice above 60 fps and can stop world work entirely.
+        if (elapsed == 0) return {paused_.Advance(wall_elapsed), 0};
+        return {active_.Advance(elapsed), SimulationClock::kStep};
+    }
+private:
+    SimulationClock active_, paused_;
+};
 }

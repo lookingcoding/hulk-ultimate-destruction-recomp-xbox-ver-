@@ -43,7 +43,7 @@ constexpr auto kSettleTime = std::chrono::milliseconds(400);
 // no row: the mouse wheel sets it in play (view.h)
 enum Setting { kMode, kResolution, kFrameRate, kVSync, kScale, kFov, kRenderDistance, kLanguage, kSettings };
 // rows the window's settings don't hold
-bool InGame(int s) { return s == kFov || s == kRenderDistance || s == kLanguage; }
+bool ChangesWindow(int s) { return s == kMode || s == kResolution; }
 
 struct Entry {
     const char* key;  // string table key of its text
@@ -219,6 +219,16 @@ std::atomic<int> g_prompt_device{0};  // PromptDevice: automatic unless settings
 std::atomic<int> g_language{0};  // the column of the string table the game read last: its language
 std::atomic<int64_t> g_changed_at{0};  // steady clock ticks of the last unsaved change, 0 for none
 std::atomic<bool> g_display_changed{false};  // a window setting changed since the last apply
+struct WindowSettings {
+    app::DisplayMode mode;
+    uint32_t width, height;
+    bool operator==(const WindowSettings&) const = default;
+};
+WindowSettings WindowSelection() {
+    const auto& s = app::Get();
+    return {s.display_mode, s.width, s.height};
+}
+WindowSettings g_applied_window{};  // last requested window geometry, excluding live render settings
 
 // the selection a selector starts at: the current setting's (one digit, the script's bytes keep their length)
 char Selection(Setting s) {
@@ -537,6 +547,8 @@ bool EqualNoCase(const std::string& a, const char* b) {
 struct RcfView {
     uint64_t dir_at = 0;
     std::vector<uint8_t> dir;  // the directory, edited
+    uint64_t names_at = 0;
+    std::vector<uint8_t> names;
     struct Added {
         uint64_t at;
         std::vector<uint8_t> bytes;
@@ -553,6 +565,7 @@ struct RcfView {
             if (lo < hi) std::memcpy(dst + (lo - at), src + (lo - from), size_t(hi - lo));
         };
         overlay(dir_at, dir.data(), dir.size());
+        overlay(names_at, names.data(), names.size());
         for (const Added& a : added) {
             if (!a.script) {
                 const auto& b = !a.keyboard.empty() && !g_controller_prompts.load() ? a.keyboard : a.bytes;
@@ -588,8 +601,7 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
     auto add = [&](uint32_t e, std::vector<uint8_t> b, const Script* script, std::vector<uint8_t> keyboard = {},
                    int column = -1) {
         uint32_t at = uint32_t(end), n = uint32_t(b.size());
-        std::memcpy(dir.data() + e * 12 + 4, &at, 4);
-        std::memcpy(dir.data() + e * 12 + 8, &n, 4);
+        rcf->Move(e, at, n);
         RcfView::Added a{end, std::move(b), script != nullptr, {}, std::move(keyboard), column};
         if (script) std::copy(std::begin(script->selection), std::end(script->selection), a.selection);
         view->added.push_back(std::move(a));
@@ -615,6 +627,8 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
     }
     for (auto& [e, script] : scripts) add(e, std::vector<uint8_t>(script.text.begin(), script.text.end()), &script);
     view->dir = std::move(dir);
+    view->names_at = rcf->names_at;
+    view->names = std::move(rcf->names);
     return view;
 }
 
@@ -629,6 +643,7 @@ std::shared_ptr<app::FileView> GameFileView(const std::string& path, uint64_t si
         std::lock_guard lock(g_lock);
         if (!g_ready.load()) {
             g_options = MakeOptions(app::Get());
+            g_applied_window = WindowSelection();
             g_ready.store(true);
         }
     }
@@ -727,7 +742,7 @@ bool DisplayCallback(uint32_t owner, uint32_t value) {
     if (Matches(s, e, st)) return true;
     Assign(s, e, st);
     LOGI("display menu: %s -> %s", g_options[s].named_value, e.key);
-    if (!InGame(s)) g_display_changed.store(true);
+    if (ChangesWindow(s)) g_display_changed.store(true);
     g_changed_at.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
     return true;
 }
@@ -741,7 +756,13 @@ void TickDisplaySettings() {
     if (!at) return;
     auto since = std::chrono::steady_clock::now() - std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(at));
     if (since < kSettleTime || !g_changed_at.compare_exchange_strong(at, 0, std::memory_order_relaxed)) return;
-    if (g_display_changed.exchange(false)) app::ApplyDisplay();  // the view's settings apply as they change
+    if (g_display_changed.exchange(false)) {
+        const auto window = WindowSelection();
+        if (!(window == g_applied_window)) {
+            g_applied_window = window;
+            app::ApplyDisplay();
+        }
+    }
     app::Save();
 }
 

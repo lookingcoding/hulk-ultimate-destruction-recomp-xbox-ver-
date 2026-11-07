@@ -32,6 +32,20 @@ void Rcf::Move(uint32_t entry, uint32_t offset, uint32_t size) {
     if (entry * 12 + 12 > dir.size()) return;
     std::memcpy(dir.data() + entry * 12 + 4, &offset, 4);
     std::memcpy(dir.data() + entry * 12 + 8, &size, 4);
+    std::vector<const File*> order;
+    for (const File& file : files) order.push_back(&file);
+    std::sort(order.begin(), order.end(), [&](const File* a, const File* b) {
+        if (Offset(a->entry) != Offset(b->entry)) return Offset(a->entry) < Offset(b->entry);
+        if (Size(a->entry) != Size(b->entry)) return Size(a->entry) < Size(b->entry);
+        return a->entry < b->entry;
+    });
+    // Preserve the name-to-hash-entry identity when a later view reparses this archive.
+    // Records have unchanged total length; the header, name metadata and trailing padding stay intact.
+    size_t at = 8;
+    for (const File* file : order) {
+        std::memcpy(names.data() + at, file->record.data(), file->record.size());
+        at += file->record.size();
+    }
 }
 
 std::optional<uint32_t> Rcf::Find(std::string_view name) const {
@@ -54,7 +68,9 @@ std::optional<Rcf> ReadRcf(uint64_t size, const ReadFn& read) {
     Rcf rcf;
     rcf.dir_at = dir_at;
     rcf.dir = bytes(dir_at, count * 12);
-    std::vector<uint8_t> names = bytes(names_at, names_size);
+    rcf.names_at = names_at;
+    rcf.names = bytes(names_at, names_size);
+    const auto& names = rcf.names;
     if (rcf.dir.size() != count * 12 || names.size() != names_size) return std::nullopt;
 
     // the names are in the files' order: the entries sorted by offset
@@ -67,10 +83,12 @@ std::optional<Rcf> ReadRcf(uint64_t size, const ReadFn& read) {
     // a name: time, alignment, 0, length with its terminator, the name, 3 bytes of padding
     size_t p = 8;
     for (uint32_t i = 0; i < count; i++) {
+        const size_t start = p;
         uint32_t len = U32(names, p + 12);
         p += 16;
-        if (!len || p + len > names.size()) return std::nullopt;
-        rcf.files.push_back({std::string(reinterpret_cast<const char*>(names.data() + p), len - 1), order[i]});
+        if (!len || p + uint64_t(len) + 3 > names.size()) return std::nullopt;
+        rcf.files.push_back({std::string(reinterpret_cast<const char*>(names.data() + p), len - 1), order[i],
+                            {names.begin() + start, names.begin() + p + len + 3}});
         p += len + 3;
     }
     return rcf;

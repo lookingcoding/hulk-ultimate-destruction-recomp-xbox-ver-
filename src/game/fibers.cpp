@@ -6,7 +6,9 @@
 #include <windows.h>
 #include <memory>
 #include <unordered_map>
+#include <cstdlib>
 #include "common/addresses.h"
+#include "common/simulation_context.h"
 #include "xdk/hle.h"
 
 using namespace kernel;
@@ -30,6 +32,7 @@ void WINAPI StartFiber(void* parameter) {
 }
 
 X86_FUNC(HULK_SUB_SWITCH_TO_FIBER) {
+    const uint32_t switch_caller = R32(ctx.esp);
     const uint32_t next = R32(ctx.esp + 4);
     const uint32_t stackBase = R32(ctx.fs_base + 4);
     const uint32_t tlsIndex = R32(hulk::addr::kFiberTlsIndex);
@@ -81,6 +84,13 @@ X86_FUNC(HULK_SUB_SWITCH_TO_FIBER) {
         LOGI("fiber: created native stack for guest %08X", next);
         fibers.emplace(next, std::move(fiber));
     }
+    if (std::getenv("HULK_TEST_SIMULATION_AUDIT")) {
+        const auto* tick = hulk::CurrentSimulationTick();
+        if (tick) LOG_FIRST(16, "fiber clock audit: current=%08X next=%08X tick_active=1 clock=%08X caller=%08X",
+                            current, next, tick->clock, switch_caller);
+        else LOG_FIRST(4, "fiber clock audit: current=%08X next=%08X tick_active=0 caller=%08X", current, next, switch_caller);
+    }
+    hulk::SuspendSimulationTick suspended_tick;
     SwitchToFiber(fibers.at(next)->native);
 }
 

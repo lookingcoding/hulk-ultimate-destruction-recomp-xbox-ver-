@@ -19,6 +19,12 @@
 #include "core/input.h"
 #include "kernel/memory.h"
 
+#ifdef HULK_KEYBOARD_HEADLESS_TEST
+// Unit tests use no HWND and must not change the desktop's cursor clipping state.
+static BOOL HeadlessClipCursor(const RECT*) { return TRUE; }
+#define ClipCursor HeadlessClipCursor
+#endif
+
 namespace hulk {
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -760,11 +766,11 @@ void KeyboardPad(int port, input::Pad& pad) {
             // Right Click = Button B (Back)
             // Delete = Button X (Delete)
             // Mouse Wheel & Cursor Move = D-Pad navigation
+            if (Down(VK_DELETE)) pad.analog[2] = 255;
             if (!gamepad_detected.load(std::memory_order_relaxed)) {
                 StepTowardTarget(now);
                 if (left_pressed || mouse_left.Sample(now)) pad.analog[0] = 255;
                 if (right_pressed || mouse_right.Sample(now)) pad.analog[1] = 255;
-                if (Down(VK_DELETE)) pad.analog[2] = 255;
                 pad.buttons |= dpad_steps.Sample(now);
             }
             look_dx = 0.0f;

@@ -9,7 +9,7 @@
 // Radical's cement libraries (.rcf), the archives on the game's disc. The header reads "ATG CORE CEMENT LIBRARY", then
 // at 0x24 the directory's offset and size, the names' offset and size, and at 0x38 the file count. Directory entries
 // are name hash, offset, size, sorted by hash; the names follow the files' order in the archive. A file moves by
-// pointing its entry somewhere else: past the archive's end is fine, the game only reads what the directory says.
+// pointing its entry somewhere else; the filename records must follow the new physical order as well.
 namespace hulk {
 
 inline constexpr uint32_t kRcfAlign = 0x800;  // files start on a sector
@@ -20,15 +20,18 @@ using ReadFn = std::function<size_t(uint64_t at, void* dst, size_t n)>;
 struct Rcf {
     uint32_t dir_at = 0;
     std::vector<uint8_t> dir;  // the directory, 12 bytes an entry
+    uint32_t names_at = 0;
+    std::vector<uint8_t> names;  // filename records in current physical order
     struct File {
         std::string name;  // as the archive spells it: art\copyright-en.p3d
         uint32_t entry;    // its directory entry
+        std::vector<uint8_t> record;  // original filename record, including metadata and padding
     };
     std::vector<File> files;  // in the archive's order
 
     uint32_t Offset(uint32_t entry) const;
     uint32_t Size(uint32_t entry) const;
-    void Move(uint32_t entry, uint32_t offset, uint32_t size);  // in dir
+    void Move(uint32_t entry, uint32_t offset, uint32_t size);  // updates dir AND names
     std::optional<uint32_t> Find(std::string_view name) const;  // any case, either slash
 };
 

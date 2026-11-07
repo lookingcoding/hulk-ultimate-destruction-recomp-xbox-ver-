@@ -8,6 +8,10 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include "app/app.h"
 #include "common/replay.h"
 #include "core/input.h"
 #include "core/log.h"
@@ -15,13 +19,14 @@
 
 namespace {
 using Clock = std::chrono::steady_clock;
-struct Event { long at, duration; std::string buttons; bool announced = false; };
+struct Event { long at, duration; std::string buttons; bool announced = false, blocked = false; };
 std::vector<Event> events;
 Clock::time_point started;
 Clock::time_point nextCheck;
 std::mutex replayMutex;
 std::filesystem::path replayPath;
 std::filesystem::file_time_type modified;
+bool internalPadTest = false;
 }
 
 static void LoadReplay(long elapsed) {
@@ -66,13 +71,26 @@ void hulk::InitReplay() {
     std::lock_guard lock(replayMutex);
     started = Clock::now();
     nextCheck = started;
+    events.clear(); replayPath.clear(); internalPadTest = false;
     const char* path = std::getenv("HULK_TEST_INPUT");
     if (!path) return;
     replayPath = path;
+    const char* internal = std::getenv("HULK_TEST_INTERNAL_PAD");
+    const wchar_t* expected = _wgetenv(L"HULK_TEST_EXE");
+    wchar_t actual[32768]{};
+    const DWORD length = GetModuleFileNameW(nullptr, actual, DWORD(std::size(actual)));
+    if (internal && std::string(internal) == "1" && expected && length && length < std::size(actual) &&
+        std::filesystem::path(expected).is_absolute() && _wcsicmp(expected, actual) == 0 &&
+        std::filesystem::is_regular_file(replayPath)) {
+        internalPadTest = true;
+        LOGR("test fixture: internal Pad only for %ls (pid=%lu); desktop keyboard/cursor and rumble disabled", actual, GetCurrentProcessId());
+    }
     std::error_code ec;
     modified = std::filesystem::last_write_time(replayPath, ec);
     LoadReplay(0);
 }
+
+bool hulk::InternalPadTestMode() { return internalPadTest; }
 
 void hulk::ReplayPad(int port, input::Pad& pad) {
     if (port || replayPath.empty()) return;
@@ -86,8 +104,20 @@ void hulk::ReplayPad(int port, input::Pad& pad) {
     }
     for (auto& event : events) {
         if (elapsed < event.at || elapsed >= event.at + event.duration) continue;
+        // Ordinary replay keeps its foreground/PID guard. The explicit, exact-executable fixture
+        // bypasses only this guard around writes to the supplied Pad, never any desktop input API.
+        if (!internalPadTest) {
+            const HWND window = static_cast<HWND>(app::Window());
+            DWORD process = 0;
+            if (!window || GetForegroundWindow() != window || !GetWindowThreadProcessId(window, &process) || process != GetCurrentProcessId()) {
+                if (!event.blocked) LOGR("test input blocked: %ld ms %s; target game is not foreground", event.at, event.buttons.c_str());
+                event.blocked = true;
+                continue;
+            }
+        }
         const bool first = !event.announced;
-        if (first) LOGI("test input: %ld ms %s", event.at, event.buttons.c_str());
+        if (first) LOGI("test input: %ld ms %s (%s, pid=%lu)", event.at, event.buttons.c_str(),
+                        internalPadTest ? "internal Pad fixture" : "foreground game verified", GetCurrentProcessId());
         event.announced = true;
         std::istringstream names(event.buttons);
         std::string name;
