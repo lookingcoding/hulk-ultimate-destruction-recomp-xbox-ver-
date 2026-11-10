@@ -26,6 +26,7 @@ void ApplyPrompts(bool controller) {
     switch (hulk::GetPromptDevice()) {
         case hulk::PromptDevice::Keyboard: hulk::SetControllerPrompts(false); break;
         case hulk::PromptDevice::Controller: hulk::SetControllerPrompts(true); break;
+        case hulk::PromptDevice::Playstation: hulk::SetControllerPrompts(false); break;
         default: hulk::SetControllerPrompts(controller); break;
     }
 }

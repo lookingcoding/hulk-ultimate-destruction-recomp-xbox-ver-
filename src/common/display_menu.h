@@ -24,11 +24,11 @@ void SetControllerPrompts(bool controller);
 // true when the tables served are the controller's
 bool ControllerPrompts();
 // which device's prompts to show: Automatic (a connected controller's, else the keyboard's), the keyboard's whatever
-// is plugged in, or a controller's. settings.toml's button_prompts
-enum class PromptDevice { Auto, Keyboard, Controller };
+// is plugged in, a controller's, or the PlayStation's wording for a DualSense. settings.toml's button_prompts
+enum class PromptDevice { Auto, Keyboard, Controller, Playstation };
 void SetPromptDevice(PromptDevice device);
 PromptDevice GetPromptDevice();
-const char* PromptDeviceName(PromptDevice device);  // "auto", "keyboard", "controller"
+const char* PromptDeviceName(PromptDevice device);  // "auto", "keyboard", "controller", "playstation"
 // the frontend's bottom prompt's button icons (owner: the frontend), set as those prompts are, before each is drawn:
 // these show a change at once (hooks.cpp)
 void MenuButtonPrompts(uint32_t owner);

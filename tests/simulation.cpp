@@ -18,5 +18,16 @@ int main() {
     if (clock.Advance(10.0f) != 4 || clock.Advance(0) != 0) return 3;
     if (clock.Advance(std::numeric_limits<float>::quiet_NaN()) != 0) return 4;
     if (clock.Advance(-1) != 0 || clock.Advance(hulk::SimulationClock::kStep) != 1) return 5;
+    // Time dilation (issue #11): a critical move's slow motion runs the game's frame time well
+    // below the real time between updates; full-speed frames must not read as dilated.
+    if (!hulk::TimeDilated(0.001f, 1.0 / 120.0)) return 6;    // 0.1x slow motion at 120 fps
+    if (!hulk::TimeDilated(0.00333f, 1.0 / 60.0)) return 7;   // 0.2x slow motion at 60 fps
+    if (hulk::TimeDilated(1.0f / 120.0f, 1.0 / 120.0)) return 8;    // full speed at 120 fps
+    if (hulk::TimeDilated(1.0f / 30.0f, 1.0 / 30.0)) return 9;      // full speed at 30 fps
+    if (hulk::TimeDilated(1.0f / 15.0f, 1.0 / 30.0)) return 10;     // a stall: elapsed relatively larger
+    if (hulk::TimeDilated(0, 1.0 / 60.0)) return 11;                // frozen time reads as not dilated
+    if (hulk::TimeDilated(-1.0f, 1.0 / 60.0)) return 12;
+    if (hulk::TimeDilated(std::numeric_limits<float>::quiet_NaN(), 1.0 / 60.0)) return 13;
+    if (hulk::TimeDilated(0.001f, 0)) return 14;
     return 0;
 }

@@ -126,18 +126,23 @@ int main(int argc, char** argv) {
 
     // the directory's entries for the original files, matched by hash
     uint32_t dir = U32(own, 0x24), count = U32(own, 0x38);
-    std::vector<std::string> scripts, tables;
-    size_t moved = 0;
-    for (uint32_t i = 0; i < count; i++) {
-        uint32_t off = U32(rcf, dir + i * 12 + 4), size = U32(rcf, dir + i * 12 + 8);
-        Check(U32(rcf, dir + i * 12) == U32(own, dir + i * 12), "hashes stay");
-        if (off == U32(own, dir + i * 12 + 4)) continue;
-        moved++;
-        Check(off >= own.size() && off % 0x800 == 0 && off + size <= rcf.size(), "moved files sit aligned past the end");
-        std::vector<uint8_t> file(rcf.begin() + off, rcf.begin() + off + size);
-        if (file.size() > 2 && file[0] == 0xFF && file[1] == 0xFE) tables.push_back(Utf16(file));
-        else scripts.emplace_back(file.begin(), file.end());
-    }
+    auto extract = [&](const std::vector<uint8_t>& served) {
+        std::vector<std::string> out_scripts, out_tables;
+        size_t out_moved = 0;
+        for (uint32_t i = 0; i < count; i++) {
+            uint32_t off = U32(served, dir + i * 12 + 4), size = U32(served, dir + i * 12 + 8);
+            Check(U32(served, dir + i * 12) == U32(own, dir + i * 12), "hashes stay");
+            if (off == U32(own, dir + i * 12 + 4)) continue;
+            out_moved++;
+            Check(off >= own.size() && off % 0x800 == 0 && off + size <= served.size(), "moved files sit aligned past the end");
+            std::vector<uint8_t> file(served.begin() + off, served.begin() + off + size);
+            if (file.size() > 2 && file[0] == 0xFF && file[1] == 0xFE) out_tables.push_back(Utf16(file));
+            else out_scripts.emplace_back(file.begin(), file.end());
+        }
+        return std::make_pair(std::move(out_scripts), std::move(out_tables));
+    };
+    auto [scripts, tables] = extract(rcf);
+    size_t moved = scripts.size() + tables.size();
     // the European disc has five string tables, the North American one English only
     Check(scripts.size() == 2 && (tables.size() == 5 || tables.size() == 1) && moved == scripts.size() + tables.size(),
           "fe_real.txt, fe_run.txt and each string table moved");
@@ -158,6 +163,26 @@ int main(int argc, char** argv) {
               tables[0].find("TBS_INSTRUCTION_DROP\t[Q] Drop Item") != std::string::npos &&
               tables[0].find("TBS_INSTRUCTION_WEAPONIZE\t[E] Weaponize") != std::string::npos,
           "the HUD's hint lines name the key that does it");
+    // the PlayStation's wording, settings.toml's button_prompts = "playstation" (issue #11): the shapes named in
+    // text, the controller's \b codes gone, and it switches at read time without rebuilding the archive
+    hulk::SetPromptDevice(hulk::PromptDevice::Playstation);
+    std::vector<uint8_t> ps_served = served();
+    auto [ps_scripts, ps_tables] = extract(ps_served);
+    Check(ps_scripts.size() == 2 && (ps_tables.size() == 5 || ps_tables.size() == 1), "the playstation serving moves the same files");
+    const std::string& ps = ps_tables[0];
+    Check(ps.find("[Cross]") != std::string::npos && ps.find("[Circle]") != std::string::npos &&
+              ps.find("[Square]") != std::string::npos && ps.find("[Triangle]") != std::string::npos,
+          "playstation prompts name all four shapes");
+    Check(ps.find("\\bus") == std::string::npos && ps.find("\\bse") == std::string::npos,
+          "playstation prompts leave no controller codes in the text");
+    Check(ps.find("TBS_MENU_ITEM_PRESS_START2_XBOX\tPress Cross") != std::string::npos &&
+              ps.find("TBS_INSTRUCTION_DROP\t[Circle] Drop Item") != std::string::npos &&
+              ps.find("TBS_INSTRUCTION_WEAPONIZE\t[Triangle] Weaponize") != std::string::npos,
+          "the title and the HUD's hints in the PlayStation's words");
+    Check(ps_served.size() == rcf.size(), "the playstation tables are the same length");
+    hulk::SetPromptDevice(hulk::PromptDevice::Auto);
+    std::vector<uint8_t> back = served();
+    Check(std::memcmp(back.data(), rcf.data(), back.size()) == 0, "back to the keyboard's prompts");
     std::string main_menu, pause_menu;
     for (const std::string& s : scripts) (s.find("AddScreen \"main\"") != std::string::npos ? main_menu : pause_menu) = s;
     for (const std::string* script : {&main_menu, &pause_menu}) {

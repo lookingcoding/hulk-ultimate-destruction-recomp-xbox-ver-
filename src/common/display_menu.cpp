@@ -378,6 +378,26 @@ const Prompt kKeyboardPrompts[] = {
     {"sc", {"[Hold E]", "[Maintenir E]", "[Mantener E]", "[Tenere E]"}},                          // Y held
 };
 
+// The same buttons in PlayStation (DualSense) wording, settings.toml's button_prompts = "playstation"
+// (issue #11). The disc's font only draws the Xbox glyphs, so the shapes are named in text; the game's
+// string format has no colour codes, so the words are not coloured.
+const Prompt kPlaystationPrompts[] = {
+    {"ju", {"[Cross]", "[Croix]", "[Cruz]", "[Croce]"}},
+    {"us", {"[Circle]", "[Rond]", "[Círculo]", "[Cerchio]"}},
+    {"at", {"[Square]", "[Carré]", "[Cuadrado]", "[Quadrato]"}},
+    {"sp", {"[Triangle]", "[Triangle]", "[Triángulo]", "[Triangolo]"}},
+    {"ta", {"[L2]", "[L2]", "[L2]", "[L2]"}},
+    {"ru", {"[R2]", "[R2]", "[R2]", "[R2]"}},
+    {"la", {"[Left Stick]", "[Stick gauche]", "[Stick izquierdo]", "[Stick sinistro]"}},
+    {"lr", {"[Left Stick]", "[Stick gauche]", "[Stick izquierdo]", "[Stick sinistro]"}},
+    {"ra", {"[Right Stick]", "[Stick droit]", "[Stick derecho]", "[Stick destro]"}},
+    {"se", {"[Cross]", "[Croix]", "[Cruz]", "[Croce]"}},
+    {"jc", {"[Hold Cross]", "[Maintenir Croix]", "[Mantener Cruz]", "[Tenere Croce]"}},
+    {"uc", {"[Hold Circle]", "[Maintenir Rond]", "[Mantener Círculo]", "[Tenere Cerchio]"}},
+    {"ac", {"[Hold Square]", "[Maintenir Carré]", "[Mantener Cuadrado]", "[Tenere Quadrato]"}},
+    {"sc", {"[Hold Triangle]", "[Maintenir Triangle]", "[Mantener Triángulo]", "[Tenere Triangolo]"}},
+};
+
 // The frontend's bottom prompt (0x000BCA60) puts each label after its button's icon, text it keeps at owner + 0x1884
 // + button * 0x80 (64 UTF-16 units) from "se", "ba", "de" in default.xbe (0x000C527B): select, back and
 // delete, the menu's A, B and X; keyboard.cpp maps the keys to those buttons
@@ -386,6 +406,13 @@ const Prompt kMenuPrompts[] = {
     {"se", {"[Enter]", "[Entrée]", "[Intro]", "[Invio]"}},
     {"ba", {"[Q]", "[Q]", "[Q]", "[Q]"}},
     {"de", {"[Delete]", "[Suppr]", "[Supr]", "[Canc]"}},
+};
+
+// the same three in the PlayStation's wording, button_prompts = "playstation"
+const Prompt kPlaystationMenuPrompts[] = {
+    {"se", {"[Cross]", "[Croix]", "[Cruz]", "[Croce]"}},
+    {"ba", {"[Circle]", "[Rond]", "[Círculo]", "[Cerchio]"}},
+    {"de", {"[Square]", "[Carré]", "[Cuadrado]", "[Quadrato]"}},
 };
 
 // the game's lines that name a controller button in words rather than as a \b glyph: the keyboard's wording, from
@@ -397,6 +424,19 @@ const Text kKeyboardLines[] = {
     {"TBS_MENU_ITEM_PRESS_START2_XBOX", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
     {"TBS_MENU_ITEM_PRESS_START2_GC", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
     {"TBS_MENU_ITEM_PRESS_START2_PS2", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START3", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
+    {"TBS_MENU_ITEM_PRESS_START3_XBOX", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
+    {"TBS_MENU_ITEM_PRESS_START3_GC", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
+    {"TBS_MENU_ITEM_PRESS_START3_PS2", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
+};
+
+// The same lines in the PlayStation's wording, button_prompts = "playstation"
+const Text kPlaystationLines[] = {
+    {"TBS_MENU_ITEM_PRESS_START", {"[Cross] Start", "[Croix] Start", "[Cruz] Start", "[Croce] Start"}},
+    {"TBS_MENU_ITEM_PRESS_START2", {"Press Cross", "Appuyez sur Croix", "Pulse Cruz", "Premi Croce"}},
+    {"TBS_MENU_ITEM_PRESS_START2_XBOX", {"Press Cross", "Appuyez sur Croix", "Pulse Cruz", "Premi Croce"}},
+    {"TBS_MENU_ITEM_PRESS_START2_GC", {"Press Cross", "Appuyez sur Croix", "Pulse Cruz", "Premi Croce"}},
+    {"TBS_MENU_ITEM_PRESS_START2_PS2", {"Press Cross", "Appuyez sur Croix", "Pulse Cruz", "Premi Croce"}},
     {"TBS_MENU_ITEM_PRESS_START3", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
     {"TBS_MENU_ITEM_PRESS_START3_XBOX", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
     {"TBS_MENU_ITEM_PRESS_START3_GC", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
@@ -431,15 +471,31 @@ const Text kHintKeys[] = {
     {"TBS_INSTRUCTION_DROP", {"[Q] ", "[Q] ", "[Q] ", "[Q] "}},
 };
 
-const char* HintLabel(const std::u16string& key, int column) {
-    for (const Text& t : kHintKeys)
-        if (KeyIs(key, t.key)) return t.text[column];
+// The same hints in the PlayStation's wording: the scenario's buttons are Y (Triangle) and B (Circle),
+// and the acquire/enter/jump hints' A is Cross
+const Text kPlaystationHints[] = {
+    {"TBS_INSTRUCTION_BREAK_FREE", {"[Triangle] ", "[Triangle] ", "[Triángulo] ", "[Triangolo] "}},
+    {"TBS_INSTRUCTION_HAMMERTOSS", {"[Triangle] ", "[Triangle] ", "[Triángulo] ", "[Triangolo] "}},
+    {"TBS_INSTRUCTION_WEAPONIZE", {"[Triangle] ", "[Triangle] ", "[Triángulo] ", "[Triangolo] "}},
+    {"TBS_INSTRUCTION_DROP", {"[Circle] ", "[Rond] ", "[Círculo] ", "[Cerchio] "}},
+};
+
+const char* HintLabel(const std::u16string& key, int column, bool playstation) {
+    const Text* const table = playstation ? kPlaystationHints : kHintKeys;
+    const size_t count = playstation ? std::size(kPlaystationHints) : std::size(kHintKeys);
+    for (size_t i = 0; i < count; i++)
+        if (KeyIs(key, table[i].key)) return table[i].text[column];
     static const char* const kSpace[4] = {"[Space] ", "[Espace] ", "[Espacio] ", "[Spazio] "};
-    return kSpace[column];
+    static const char* const kCross[4] = {"[Cross] ", "[Croix] ", "[Cruz] ", "[Croce] "};
+    return playstation ? kCross[column] : kSpace[column];
 }
 
-// a string table's lines with each button prompt as its key, its press start lines in the keyboard's words
-std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column) {
+// a string table's lines with each button prompt as its key, its press start lines in the keyboard's or the
+// PlayStation's words
+std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column, bool playstation) {
+    const Text* const lines = playstation ? kPlaystationLines : kKeyboardLines;
+    const size_t line_count = playstation ? std::size(kPlaystationLines) : std::size(kKeyboardLines);
+    const Prompt* const prompts = playstation ? kPlaystationPrompts : kKeyboardPrompts;
     std::vector<uint8_t> out(in.begin(), in.begin() + 2);
     std::u16string text(reinterpret_cast<const char16_t*>(in.data() + 2), (in.size() - 2) / 2);
     std::u16string line_key;
@@ -454,11 +510,11 @@ std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column)
             if (tab != std::u16string::npos) {
                 size_t end = text.find(u'\n', i);
                 end = end == std::u16string::npos ? text.size() : end + 1;
-                for (const Text& k : kKeyboardLines) {
-                    if (!KeyIs(line_key, k.key)) continue;
-                    AppendUtf16(out, k.key);
+                for (size_t k = 0; k < line_count; k++) {
+                    if (!KeyIs(line_key, lines[k].key)) continue;
+                    AppendUtf16(out, lines[k].key);
                     AppendUtf16(out, "\t");
-                    AppendUtf16(out, k.text[column]);
+                    AppendUtf16(out, lines[k].text[column]);
                     AppendUtf16(out, "\r\n");
                     line_end = end;
                     break;
@@ -470,7 +526,7 @@ std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column)
                     while (!rest.empty() && (rest.back() == u'\r' || rest.back() == u'\n')) rest.pop_back();
                     AppendUtf16(out, std::string(line_key.begin(), line_key.end()).c_str());
                     AppendUtf16(out, "\t");
-                    AppendUtf16(out, HintLabel(line_key, column));
+                    AppendUtf16(out, HintLabel(line_key, column, playstation));
                     for (char16_t c : rest) {
                         out.push_back(uint8_t(c));
                         out.push_back(uint8_t(c >> 8));
@@ -484,8 +540,8 @@ std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column)
         }
         if (text[i] == u'\\' && i + 3 < text.size() && text[i + 1] == u'b') {
             const Prompt* p = nullptr;
-            for (const Prompt& k : kKeyboardPrompts)
-                if (text[i + 2] == char16_t(k.code[0]) && text[i + 3] == char16_t(k.code[1])) p = &k;
+            for (size_t k = 0; k < (playstation ? std::size(kPlaystationPrompts) : std::size(kKeyboardPrompts)); k++)
+                if (text[i + 2] == char16_t(prompts[k].code[0]) && text[i + 3] == char16_t(prompts[k].code[1])) p = &prompts[k];
             if (p) {
                 AppendUtf16(out, p->text[column]);
                 i += 3;
@@ -498,10 +554,12 @@ std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column)
     return out;
 }
 
-// a string table (UTF-16 lines of key, tab, text) with the menu's lines after its own, as the controller's prompts
-// and as the keyboard's, the same length: the shorter ends in a comment line of spaces
-std::optional<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>> EditStrings(const std::vector<uint8_t>& in, int column,
-                                                                                 const char* name) {
+// a string table (UTF-16 lines of key, tab, text) with the menu's lines after its own, as the controller's prompts,
+// as the keyboard's and as the PlayStation's, the same length: the shorter ends in a comment line of spaces
+struct EditedStrings {
+    std::vector<uint8_t> controller, keyboard, playstation;
+};
+std::optional<EditedStrings> EditStrings(const std::vector<uint8_t>& in, int column, const char* name) {
     if (in.size() < 4 || in[0] != 0xFF || in[1] != 0xFE) {
         LOGW("display menu: %s is not a UTF-16 string table", name);
         return std::nullopt;
@@ -515,14 +573,17 @@ std::optional<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>> EditStrings
         AppendUtf16(pad, t.text[column]);
         AppendUtf16(pad, "\r\n");
     }
-    std::vector<uint8_t> keys = KeyboardPrompts(pad, column);
-    const size_t length = std::max(pad.size(), keys.size()) + 6;  // room for the shortest comment line, "#\r\n"
-    for (std::vector<uint8_t>* v : {&pad, &keys}) {
+    EditedStrings out;
+    out.controller = pad;
+    out.keyboard = KeyboardPrompts(pad, column, false);
+    out.playstation = KeyboardPrompts(pad, column, true);
+    const size_t length = std::max({pad.size(), out.keyboard.size(), out.playstation.size()}) + 6;  // room for the shortest comment line, "#\r\n"
+    for (std::vector<uint8_t>* v : {&out.controller, &out.keyboard, &out.playstation}) {
         AppendUtf16(*v, "#");
         while (v->size() < length - 4) AppendUtf16(*v, " ");
         AppendUtf16(*v, "\r\n");
     }
-    return std::make_pair(std::move(pad), std::move(keys));
+    return out;
 }
 
 bool EqualNoCase(const std::string& a, const char* b) {
@@ -542,7 +603,8 @@ struct RcfView {
         std::vector<uint8_t> bytes;
         bool script;                  // the selections follow the settings, the rest stays
         size_t selection[kSettings];  // a script's named values' digits
-        std::vector<uint8_t> keyboard;  // a string table's keyboard prompts, as long as bytes
+        std::vector<uint8_t> keyboard;    // a string table's keyboard prompts, as long as bytes
+        std::vector<uint8_t> playstation;  // its PlayStation prompts, as long as bytes
         int column = -1;                // a string table's language
     };
     std::vector<Added> added;
@@ -555,7 +617,15 @@ struct RcfView {
         overlay(dir_at, dir.data(), dir.size());
         for (const Added& a : added) {
             if (!a.script) {
-                const auto& b = !a.keyboard.empty() && !g_controller_prompts.load() ? a.keyboard : a.bytes;
+                const std::vector<uint8_t>* text = &a.bytes;
+                if (!a.keyboard.empty()) {
+                    switch (GetPromptDevice()) {
+                        case PromptDevice::Keyboard: text = &a.keyboard; break;
+                        case PromptDevice::Playstation: text = &a.playstation; break;
+                        default: text = g_controller_prompts.load() ? &a.bytes : &a.keyboard; break;
+                    }
+                }
+                const auto& b = *text;
                 if (a.column >= 0 && at < a.at + b.size() && a.at < at + n) g_language.store(a.column);
                 overlay(a.at, b.data(), b.size());
                 continue;
@@ -586,11 +656,11 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
     view->dir_at = dir_at;
     uint64_t end = (size + kRcfAlign - 1) & ~uint64_t(kRcfAlign - 1);
     auto add = [&](uint32_t e, std::vector<uint8_t> b, const Script* script, std::vector<uint8_t> keyboard = {},
-                   int column = -1) {
+                   std::vector<uint8_t> playstation = {}, int column = -1) {
         uint32_t at = uint32_t(end), n = uint32_t(b.size());
         std::memcpy(dir.data() + e * 12 + 4, &at, 4);
         std::memcpy(dir.data() + e * 12 + 8, &n, 4);
-        RcfView::Added a{end, std::move(b), script != nullptr, {}, std::move(keyboard), column};
+        RcfView::Added a{end, std::move(b), script != nullptr, {}, std::move(keyboard), std::move(playstation), column};
         if (script) std::copy(std::begin(script->selection), std::end(script->selection), a.selection);
         view->added.push_back(std::move(a));
         end = (end + n + kRcfAlign - 1) & ~uint64_t(kRcfAlign - 1);
@@ -611,7 +681,7 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
         if (!e) continue;  // a release without that language
         auto edited = EditStrings(contents(*e), column, name);
         if (!edited) return nullptr;
-        add(*e, std::move(edited->first), nullptr, std::move(edited->second), column);
+        add(*e, std::move(edited->controller), nullptr, std::move(edited->keyboard), std::move(edited->playstation), column);
     }
     for (auto& [e, script] : scripts) add(e, std::vector<uint8_t>(script.text.begin(), script.text.end()), &script);
     view->dir = std::move(dir);
@@ -661,6 +731,7 @@ const char* PromptDeviceName(PromptDevice device) {
     switch (device) {
         case PromptDevice::Keyboard: return "keyboard";
         case PromptDevice::Controller: return "controller";
+        case PromptDevice::Playstation: return "playstation";
         default: return "auto";
     }
 }
@@ -669,10 +740,12 @@ const char* PromptDeviceName(PromptDevice device) {
 
 void MenuButtonPrompts(uint32_t owner) {
     const bool controller = g_controller_prompts.load();
+    const bool playstation = GetPromptDevice() == PromptDevice::Playstation;
     const int column = g_language.load();
     for (uint32_t i = 0; i < std::size(kMenuPrompts); i++) {
         std::vector<uint8_t> text;
         if (controller) AppendUtf16(text, (std::string("") + kMenuPrompts[i].code).c_str());
+        else if (playstation) AppendUtf16(text, kPlaystationMenuPrompts[i].text[column]);
         else AppendUtf16(text, kMenuPrompts[i].text[column]);
         text.push_back(0), text.push_back(0);
         if (void* icon = kernel::HostPtr(owner + kMenuIcons + i * kMenuIconSize); icon && text.size() <= kMenuIconSize)

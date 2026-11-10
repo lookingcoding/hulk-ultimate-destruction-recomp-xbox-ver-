@@ -40,6 +40,7 @@ void LoadCustomSettings(const void* table_ptr) {
         PromptDevice device = PromptDevice::Auto;
         if (*v == "keyboard") device = PromptDevice::Keyboard;
         else if (*v == "controller") device = PromptDevice::Controller;
+        else if (*v == "playstation") device = PromptDevice::Playstation;
         SetPromptDevice(device);
     }
     // field of view: degrees added to the game's; render distance: percent of the game's far and fog planes (view.h)
