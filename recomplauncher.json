@@ -29,8 +29,17 @@
             {
                 "path": "{install}/mods"
             }
+        ],
+        "logs": [
+            {
+                "path": "{install}/game/logs"
+            }
         ]
     },
+    "saves": [
+        "{install}/game/hdd/E",
+        "{install}/game/settings.toml"
+    ],
     "settings": [
         {
             "id": "button_prompts",
