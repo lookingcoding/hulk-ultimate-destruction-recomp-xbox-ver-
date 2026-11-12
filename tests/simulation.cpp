@@ -36,5 +36,11 @@ int main() {
     if (hulk::TimeDilated(-1.0f, 1.0 / 60.0)) return 12;
     if (hulk::TimeDilated(std::numeric_limits<float>::quiet_NaN(), 1.0 / 60.0)) return 13;
     if (hulk::TimeDilated(0.001f, 0)) return 14;
+    using hulk::UpdatePath;
+    if (hulk::ClassifyUpdate(6, 0, true) != UpdatePath::Paused6) return 19;
+    if (hulk::ClassifyUpdate(7, -1, true) != UpdatePath::Paused7) return 20;
+    if (hulk::ClassifyUpdate(2, 0, true) != UpdatePath::Nonpositive) return 21;
+    if (hulk::ClassifyUpdate(2, 0.001f, true) != UpdatePath::Dilated) return 22;
+    if (hulk::ClassifyUpdate(2, 0.01f, false) != UpdatePath::Accumulator) return 23;
     return 0;
 }

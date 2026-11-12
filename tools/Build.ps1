@@ -45,6 +45,12 @@ $env:TEMP = $build
 $env:TMP = $build
 Push-Location $project
 try {
+    # The final present-counter patch overlaps the renderer patch. Unapply it before
+    # checking earlier patches, then the normal loop reapplies it in order.
+    $presentPatch = Join-Path $project 'patches/zzzzzzz-present-counter.patch'
+    if (Test-AppliedPatch $presentPatch) {
+        Invoke-BuildTool git @('-C','sdk','apply','--reverse',$presentPatch)
+    }
     foreach ($patchFile in Get-ChildItem (Join-Path $project 'patches') -Filter '*.patch' -File) {
         $patch = $patchFile.FullName
         if (!(Test-AppliedPatch $patch)) {

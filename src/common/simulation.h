@@ -1,6 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace hulk {
 // The original world pipeline has per-update collision/pose work as well as dt integration.
@@ -20,6 +21,16 @@ public:
 private:
     double remainder_ = 0;
 };
+
+// Classify in the same priority order as the guest hook's bypass branches.
+enum class UpdatePath { Paused6, Paused7, Nonpositive, Dilated, Accumulator };
+inline UpdatePath ClassifyUpdate(uint32_t state, float elapsed, bool dilated) {
+    if (state == 6) return UpdatePath::Paused6;
+    if (state == 7) return UpdatePath::Paused7;
+    if (elapsed <= 0) return UpdatePath::Nonpositive;
+    if (dilated) return UpdatePath::Dilated;
+    return UpdatePath::Accumulator;
+}
 
 // True when the game is running slowed time: its elapsed frame time is well below the real
 // time between world updates. A critical move's slow motion scales the game's frame timer
