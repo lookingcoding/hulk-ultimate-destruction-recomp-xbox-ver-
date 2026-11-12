@@ -1,5 +1,7 @@
 # Hulk Recompiled
 
+<a href="https://recomplauncher.com/game/hulk-ultimate-destruction-recomp-xbox-ver"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
+
 A native Windows port and static recompilation of the original Xbox version of **The Incredible Hulk: Ultimate Destruction**, built on [Xbox XBE Recomp](https://github.com/TGP482/XboxXBE-Recomp).
 
 > [!IMPORTANT]
