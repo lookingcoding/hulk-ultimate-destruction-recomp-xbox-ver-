@@ -18,6 +18,13 @@ int main() {
     if (clock.Advance(10.0f) != 4 || clock.Advance(0) != 0) return 3;
     if (clock.Advance(std::numeric_limits<float>::quiet_NaN()) != 0) return 4;
     if (clock.Advance(-1) != 0 || clock.Advance(hulk::SimulationClock::kStep) != 1) return 5;
+    // A long stall drops excess time, including any prior fractional tick, and does not
+    // leave a catch-up backlog to drain over subsequent frames.
+    hulk::SimulationClock stalled;
+    if (stalled.Advance(hulk::SimulationClock::kStep * 0.5f) != 0) return 15;
+    if (stalled.Advance(30.0f) != 4) return 16;
+    if (stalled.Advance(hulk::SimulationClock::kStep * 0.5f) != 0) return 17;
+    if (stalled.Advance(hulk::SimulationClock::kStep * 0.5f) != 1) return 18;
     // Time dilation (issue #11): a critical move's slow motion runs the game's frame time well
     // below the real time between updates; full-speed frames must not read as dilated.
     if (!hulk::TimeDilated(0.001f, 1.0 / 120.0)) return 6;    // 0.1x slow motion at 120 fps
