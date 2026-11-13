@@ -49,10 +49,14 @@ add_test(NAME keyboard_input_lifecycle COMMAND hulk_input_tests)
 add_executable(hulk_kernel_io_tests tests/kernel_io.cpp ${SDK}/runtime/kernel/io_completion.cpp)
 target_include_directories(hulk_kernel_io_tests PRIVATE ${SDK}/runtime)
 add_test(NAME kernel_io_completion COMMAND hulk_kernel_io_tests)
-add_executable(hulk_display_menu_tests tests/display_menu.cpp src/common/display_menu.cpp src/common/view.cpp
+add_executable(hulk_display_menu_tests tests/display_menu.cpp src/common/display_menu.cpp src/common/cheats.cpp src/common/view.cpp
     src/common/rcf.cpp src/common/language.cpp)
 target_include_directories(hulk_display_menu_tests PRIVATE src ${SDK}/runtime)
 add_test(NAME display_menu_rcf COMMAND hulk_display_menu_tests ${CMAKE_CURRENT_SOURCE_DIR}/assets/misc.rcf)
+add_executable(hulk_cheat_tests tests/cheats.cpp src/common/cheats.cpp src/common/settings_ui.cpp)
+target_include_directories(hulk_cheat_tests PRIVATE src ${SDK}/runtime)
+target_link_libraries(hulk_cheat_tests PRIVATE tomlplusplus::tomlplusplus)
+add_test(NAME cheat_preference COMMAND hulk_cheat_tests)
 
 file(GLOB XBE_HOST_SOURCES CONFIGURE_DEPENDS src/*/*.cpp)
 list(FILTER XBE_HOST_SOURCES EXCLUDE REGEX "/src/game(_usa)?/")

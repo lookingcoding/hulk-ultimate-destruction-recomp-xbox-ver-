@@ -1,5 +1,6 @@
 #include "common/display_menu.h"
 #include "common/addresses.h"
+#include "common/cheats.h"
 #include "common/language.h"
 #include "common/rcf.h"
 #include "common/view.h"
@@ -214,6 +215,7 @@ std::mutex g_lock;
 std::vector<Option> g_options;  // made once when misc.rcf is first opened, before the frontend loads
 std::atomic<bool> g_ready{false};   // g_options is made and stays as it is
 std::atomic<bool> g_served{false};  // the game reads the edited script
+std::atomic<bool> g_cheats_served{false};
 std::atomic<bool> g_controller_prompts{false};  // the string tables as the game reads them: controller or keyboard
 std::atomic<int> g_prompt_device{0};  // PromptDevice: automatic unless settings.toml says otherwise
 std::atomic<int> g_language{0};  // the column of the string table the game read last: its language
@@ -261,6 +263,58 @@ void SwapInvertLabels(std::string& script) {
             if (choices != std::string::npos && at - choices < 120) script.replace(choices, yes_no.size(), no_yes);
         }
     }
+}
+
+// The disc already implements the invulnerability selector and its callback. Expose only that
+// control; the developer screen also contains irreversible unlock buttons and a disabled selector.
+bool EditCheats(std::string& script) {
+    const std::string nl = script.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+    const std::string extras = "AddScreen \"extras\"";
+    const std::string block = "ifbuild DEBUG TUNE RELEASE" + nl + "{" + nl +
+                              "    AddTextButton \"FEmain_right_item6\"";
+    const std::string setup = "    $MACRO_INSERT SetupControlButtonLabel";
+    size_t start = script.find(extras), row = start == std::string::npos ? start : script.find(block, start);
+    size_t end = row == std::string::npos ? row : script.find(setup, row);
+    size_t close = row == std::string::npos ? row : script.find(nl + "}" + nl, row);
+    const std::string code_row = "        text \"TBS_MENU_ITEM_SF_CODE_INPUT\" 1" + nl +
+                                 "        OnSelect gotoscreen \"cheats\"" + nl;
+    size_t first = start == std::string::npos ? start : script.find(code_row, start);
+    size_t screen = script.find("AddScreen \"dev_cheats\"");
+    size_t next = screen == std::string::npos ? screen : script.find("AddScreen \"options\"", screen);
+    if (row == std::string::npos || end == std::string::npos || screen == std::string::npos ||
+        close == std::string::npos || next == std::string::npos || first == std::string::npos ||
+        first > row || close > end || end > screen) return false;
+
+    std::string sub = "AddScreen \"dev_cheats\"" + nl + "{" + nl;
+    sub += "    $MACRO_INSERT typicalScreenSetup" + nl + nl;
+    sub += "    OnTransitionInStart function \"PCCheatEnter\"" + nl;
+    sub += "    OnTransitionOutStartBackward function \"PCCheatExit\"" + nl;
+    sub += "    AddLabel \"FEsubMenu_title\"" + nl + "    {" + nl;
+    sub += "        text \"TBS_MENU_ITEM_SF_CHEATS\" 1" + nl;
+    sub += "        $MACRO_INSERT FormatTitleText" + nl;
+    sub += "        TransitionAnimEnter \"fadein\"" + nl + "        TransitionAnimExit \"fadeout\"" + nl + "    }" + nl;
+    sub += "    AddTextSelector \"FEsubMenu_text1\"" + nl + "    {" + nl;
+    sub += "        text \"TBS_CHEAT_INVULNERABILITY\" 1" + nl;
+    sub += "        name \"cheat_invulnerability_selector\"" + nl;
+    sub += "        TextSelection \"\" TBS_MENU_ITEM_CHOICE_ON TBS_MENU_ITEM_CHOICE_OFF" + nl;
+    sub += "        NamedValue \"CheatInvulnerability\"" + nl;
+    sub += "        OnHighlight function \"UpdateControlButtonString\" \"DynamicControlButtonLabel\" \"2\"" + nl;
+    sub += "        $MACRO_INSERT menu_item_1" + nl + "    }" + nl;
+    sub += "    AddTextButton \"FEsubMenu_text2\"" + nl + "    {" + nl;
+    sub += "        text \"TBS_MENU_ITEM_SF_CODE_INPUT\" 1" + nl;
+    sub += "        OnSelect function \"PCCheatExit\"" + nl;
+    sub += "        OnSelect gotoscreen \"cheats\"" + nl;
+    sub += "        OnHighlight function \"UpdateControlButtonString\" \"DynamicControlButtonLabel\" \"1\"" + nl;
+    sub += "        $MACRO_INSERT menu_item_2" + nl + "    }" + nl;
+    sub += "    $MACRO_INSERT SetupControlButtonLabel" + nl + "}" + nl + nl;
+    script.replace(screen, next - screen, sub);
+
+    script.erase(row, close + nl.size() + 1 + nl.size() - row);
+    const std::string item = "        text \"TBS_MENU_ITEM_SF_CHEATS\" 1" + nl +
+                             "        OnSelect gotoscreen \"dev_cheats\"" + nl +
+                             "        OnSelect function \"UpdateCheatsScreen\"" + nl;
+    script.replace(first, code_row.size(), item);
+    return true;
 }
 
 std::optional<Script> EditScript(const std::string& in, const Layout& l) {
@@ -667,13 +721,19 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
     };
 
     std::vector<std::pair<uint32_t, Script>> scripts;  // directory entry, edited
+    bool cheats_edited = false;
     for (const Layout& l : kLayouts) {
         auto e = find(l.file);
         if (!e) continue;
         std::vector<uint8_t> raw = contents(*e);
         std::string text(raw.begin(), raw.end());
         SwapInvertLabels(text);
-        if (auto script = EditScript(text, l)) scripts.emplace_back(*e, std::move(*script));
+        const bool edited = l.main && EditCheats(text);
+        if (l.main && !edited) LOGW("cheats menu: %s is not the script it expects", l.file);
+        if (auto script = EditScript(text, l)) {
+            if (l.main) cheats_edited = edited;
+            scripts.emplace_back(*e, std::move(*script));
+        }
     }
     if (scripts.empty()) return nullptr;
     for (auto& [name, column] : kLanguages) {
@@ -685,6 +745,7 @@ std::shared_ptr<RcfView> MakeRcfView(uint64_t size, const std::function<size_t(u
     }
     for (auto& [e, script] : scripts) add(e, std::vector<uint8_t>(script.text.begin(), script.text.end()), &script);
     view->dir = std::move(dir);
+    g_cheats_served.store(cheats_edited);
     return view;
 }
 
@@ -717,6 +778,7 @@ std::shared_ptr<app::FileView> GameFileView(const std::string& path, uint64_t si
 }
 
 void SetControllerPrompts(bool controller) { g_controller_prompts.store(controller); }
+bool CheatsAvailable() { return g_cheats_served.load(); }
 
 bool ControllerPrompts() { return g_controller_prompts.load(); }
 
@@ -756,10 +818,11 @@ void MenuButtonPrompts(uint32_t owner) {
 void RegisterDisplayCallbacks(X86Context& ctx) {
     if (!g_served.load()) return;  // the game reads its own script, which names none of them
     const uint32_t esp = ctx.esp;
-    for (uint32_t s = 0; s <= kSettings; s++) {
+    for (uint32_t s = 0; s <= kSettings + 2; s++) {
         // the name only lives through the call, below the guest's stack
-        bool sync = s == kSettings;
-        std::string name = sync ? kSyncName : std::string(g_options[s].named_value) + "Changed";
+        bool sync = s >= kSettings;
+        std::string name = s == kSettings ? kSyncName : s == kSettings + 1 ? "PCCheatEnter" :
+                           s == kSettings + 2 ? "PCCheatExit" : std::string(g_options[s].named_value) + "Changed";
         ctx.esp = (esp - 64) & ~3u;
         std::memcpy(kernel::HostPtr(ctx.esp), name.c_str(), name.size() + 1);
         uint32_t functor = kernel::CallGuest(ctx, kGuestNew, {12});
@@ -773,6 +836,10 @@ void RegisterDisplayCallbacks(X86Context& ctx) {
 }
 
 bool DisplaySync(X86Context& ctx, uint32_t owner) {
+    if (owner == kOwnerBase + kSettings + 1 || owner == kOwnerBase + kSettings + 2) {
+        SetCheatScreenActive(owner == kOwnerBase + kSettings + 1);
+        return true;
+    }
     if (owner != kOwnerBase + kSettings) return false;
     if (!g_ready.load()) return true;
     const uint32_t esp = ctx.esp, ecx = ctx.ecx;

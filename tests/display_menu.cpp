@@ -8,6 +8,7 @@
 #include <vector>
 #include "app/app.h"
 #include "common/display_menu.h"
+#include "common/cheats.h"
 #include "common/language.h"
 #include "common/view.h"
 #include "kernel/kernel.h"
@@ -185,6 +186,28 @@ int main(int argc, char** argv) {
     Check(std::memcmp(back.data(), rcf.data(), back.size()) == 0, "back to the keyboard's prompts");
     std::string main_menu, pause_menu;
     for (const std::string& s : scripts) (s.find("AddScreen \"main\"") != std::string::npos ? main_menu : pause_menu) = s;
+    const size_t extras = main_menu.find("AddScreen \"extras\"");
+    const size_t cheat_row = main_menu.find("AddTextButton \"FEmain_right_item1\"", extras);
+    const size_t cheat_screen = main_menu.find("AddScreen \"dev_cheats\"");
+    const size_t options_screen = main_menu.find("AddScreen \"options\"", cheat_screen);
+    Check(extras != std::string::npos && cheat_row != std::string::npos && cheat_row < cheat_screen &&
+              main_menu.find("OnSelect gotoscreen \"dev_cheats\"", cheat_row) < cheat_screen,
+          "Extras opens the native cheats screen from a navigable slot");
+    if (cheat_screen != std::string::npos && options_screen != std::string::npos) {
+        const std::string cheats = main_menu.substr(cheat_screen, options_screen - cheat_screen);
+        Check(cheats.find("NamedValue \"CheatInvulnerability\"") != std::string::npos &&
+                  cheats.find("name \"cheat_invulnerability_selector\"") != std::string::npos &&
+                  cheats.find("TBS_MENU_ITEM_CHOICE_ON TBS_MENU_ITEM_CHOICE_OFF") != std::string::npos,
+              "cheats screen uses the game's on/off selector");
+        Check(cheats.find("CheatAllMoves") == std::string::npos && cheats.find("DoUnlockChapterMoves") == std::string::npos &&
+                  cheats.find("UnlockAllBonus") == std::string::npos,
+              "unverified and progression-changing developer controls are absent");
+        Check(cheats.find("OnSelect gotoscreen \"cheats\"") != std::string::npos,
+              "the game's code-input screen remains reachable");
+        Check(cheats.find("OnTransitionInStart function \"PCCheatEnter\"") != std::string::npos &&
+                  cheats.find("OnTransitionOutStartBackward function \"PCCheatExit\"") != std::string::npos,
+              "the cheat screen scopes preference recording to its lifetime");
+    } else Check(false, "the native cheats screen exists");
     for (const std::string* script : {&main_menu, &pause_menu}) {
         Check(script->find("AddScreen \"display_options\"") != std::string::npos, "each script has the Display Options screen");
         size_t options = script->find("AddScreen \"options\"");
@@ -225,15 +248,20 @@ int main(int argc, char** argv) {
     ctx.esp = 0x80000;
     hulk::RegisterDisplayCallbacks(ctx);
     Check(ctx.esp == 0x80000, "the guest's stack is as it was");
-    Check(kernel::registered.size() == 9, "eight selector callbacks and the sync");
-    if (kernel::registered.size() == 9) {
+    Check(kernel::registered.size() == 11, "eight selector callbacks, display sync and cheat screen events");
+    if (kernel::registered.size() == 11) {
         Check(kernel::registered[1].first == "PCResolutionChanged", "named as the script names them");
         Check(kernel::registered[1].second == std::vector<uint32_t>({0x409B40, 0x101, 0xBBEC0}), "functor through the shared handler");
         Check(kernel::registered[6].first == "PCRenderDistanceChanged", "the render distance's");
         Check(kernel::registered[7].first == "PCLanguageChanged", "the language's");
         Check(kernel::registered[8].first == "PCDisplaySync", "the sync");
         Check(kernel::registered[8].second == std::vector<uint32_t>({0x409B30, 0x108, 0xB46B0}), "sync through Print");
+        Check(kernel::registered[9].first == "PCCheatEnter" && kernel::registered[10].first == "PCCheatExit",
+              "cheat screen events are registered");
     }
+    Check(!hulk::CheatScreenActive(), "startup is outside the cheat screen");
+    Check(hulk::DisplaySync(ctx, 0x109) && hulk::CheatScreenActive(), "enter enables preference recording");
+    Check(hulk::DisplaySync(ctx, 0x10a) && !hulk::CheatScreenActive(), "exit disables preference recording");
     Check(!hulk::DisplaySync(ctx, 0x00123456), "a real Print owner goes to the game");
     ctx.ecx = 0xABCD;
     Check(hulk::DisplaySync(ctx, 0x108), "the sync");

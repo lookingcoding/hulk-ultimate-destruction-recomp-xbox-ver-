@@ -14,6 +14,8 @@ namespace app { struct FileView; }
 // named values; the game calls back the host when one changes. Nothing on disk changes.
 namespace hulk {
 
+bool CheatsAvailable();  // the native Cheats screen was successfully served through the archive view
+
 // GameInfo::file: misc.rcf as the game reads it, null for every other file
 std::shared_ptr<app::FileView> GameFileView(const std::string& path, uint64_t size,
                                             const std::function<size_t(uint64_t, void*, size_t)>& read);
