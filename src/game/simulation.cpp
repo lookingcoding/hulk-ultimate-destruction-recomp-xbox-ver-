@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstdlib>
 #include "common/simulation.h"
+#include "common/addresses.h"
 #include "core/log.h"
 #include "xdk/hle.h"
 
@@ -31,26 +32,37 @@ X86_FUNC(WORLD_UPDATE) {
     last = now;
     const uint32_t stack = ctx.esp, world = ctx.ecx;
     const uint32_t state = X86_MEM32(ctx.esp + 4), elapsed_bits = X86_MEM32(ctx.esp + 8);
-    float elapsed = std::bit_cast<float>(elapsed_bits);
-    // Test-only: HULK_TEST_TIMESCALE forces the game's slow motion on every frame, so the
-    // dilated path can be exercised without a critical move (issue #11's A/B harness). The
-    // guest argument slot is scaled before anything reads it, exactly as the game's own
-    // time-scale multiplier shrinks it. HULK_TEST_NO_DILATION_FIX reproduces v0.4.5's
-    // behaviour (the dilated frames stay on the 60 Hz accumulator) for the comparison.
+    const float elapsed = std::bit_cast<float>(elapsed_bits);
+    // The world timer is owned by the app. Its multiplier is Q16 at +0x38; unlike a
+    // wall-clock ratio it is unaffected by scheduling jitter and the guest's stall clamp.
+    const uint32_t app = X86_MEM32(hulk::addr::kApp);
+    const uint32_t timer = app ? uint32_t(X86_MEM32(app + 0x58)) : 0;
+    // Test-only: set the guest multiplier so the guest clock itself scales subsequent frames.
+    // HULK_TEST_NO_DILATION_FIX keeps the issue #11 accumulator-only comparison available.
     static const float forced_scale = [] {
         const char* test = std::getenv("HULK_TEST_TIMESCALE");
         return test ? float(std::atof(test)) : 1.0f;
     }();
     static const bool no_fix = std::getenv("HULK_TEST_NO_DILATION_FIX") != nullptr;
-    // The forced scale stands in for the game's own slow-motion multiplier, which shrinks the
-    // elapsed before this hook sees it; the dilation check must see it shrunk.
-    const float scaled = forced_scale > 0 && forced_scale < 1 ? elapsed * forced_scale : elapsed;
-    const bool dilated = !no_fix && hulk::TimeDilated(scaled, real_dt);
-    if (forced_scale > 0) {
-        if (forced_scale < 1) {
-            elapsed = scaled;
-            X86_MEM32(ctx.esp + 8) = std::bit_cast<uint32_t>(elapsed);
+    if (timer && forced_scale > 0 && forced_scale < 1) {
+        X86_MEM32(timer + 0x38) = uint32_t(std::lround(forced_scale * 65536));
+        X86_MEM32(timer + 0x3c) = 0;
+    }
+    const uint64_t scale = timer ? uint64_t(X86_MEM32(timer + 0x38)) |
+                                    (uint64_t(X86_MEM32(timer + 0x3c)) << 32) : 0;
+    const bool dilated = !no_fix && hulk::TimeDilated(timer != 0, scale);
+    static const bool audit = std::getenv("HULK_TEST_TIMING_AUDIT") != nullptr;
+    if (audit && timer && X86_MEM32(state) != 6 && X86_MEM32(state) != 7) {
+        static unsigned logged = 0;
+        if (logged++ < 100) {
+            const uint64_t raw = uint64_t(X86_MEM32(timer + 0x28)) | (uint64_t(X86_MEM32(timer + 0x2c)) << 32);
+            const uint64_t game = uint64_t(X86_MEM32(timer + 0x30)) | (uint64_t(X86_MEM32(timer + 0x34)) << 32);
+            LOGI("timing audit: elapsed=%.8f real=%.8f scale=%llu bypass=%u raw_ticks=%llu game_ticks=%llu state=%u",
+                 elapsed, real_dt, static_cast<unsigned long long>(scale), unsigned(dilated),
+                 static_cast<unsigned long long>(raw), static_cast<unsigned long long>(game), uint32_t(X86_MEM32(state)));
         }
+    }
+    if (forced_scale > 0) {
         g_update_window += real_dt;
         if (g_update_window >= 5) {
             LOGI("world update test: %u updates in %.1f s at %.2fx time scale%s", g_updates, g_update_window,
