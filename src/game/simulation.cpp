@@ -24,7 +24,7 @@ namespace {
 // player's log names the path when updates run far faster than 60 Hz. The window is owned by
 // the guest update thread; the presentation counter is atomic.
 struct UpdateStats {
-    unsigned calls = 0, accumulator_calls = 0, steps = 0, dilated = 0;
+    unsigned calls = 0, accumulator_calls = 0, steps = 0, dilated = 0, unpaced = 0;
     unsigned paused6 = 0, paused7 = 0, nonpositive = 0;
     double window = 0;
     uint64_t presents = 0;
@@ -32,6 +32,7 @@ struct UpdateStats {
 }  // namespace
 X86_FUNC(WORLD_UPDATE) {
     static hulk::SimulationClock clock;
+    static hulk::FrameGate frames;
     static uint32_t owner = 0;
     static auto last = std::chrono::steady_clock::now();
     const auto now = std::chrono::steady_clock::now();
@@ -70,27 +71,32 @@ X86_FUNC(WORLD_UPDATE) {
         }
     }
     const uint32_t guest_state = X86_MEM32(state);
+    // HULK_TEST_NO_FRAME_GATE keeps the accumulator-only comparison for issue #13 available.
+    static const bool no_gate = std::getenv("HULK_TEST_NO_FRAME_GATE") != nullptr;
+    const bool presented = frames.Presented(hulk::g_frame_swaps.load(std::memory_order_relaxed)) || no_gate;
     auto& stats = g_stats;
     stats.calls++;
     stats.window += real_dt;
     // Include the current call in its path count before reporting the window.
-    const auto path = hulk::ClassifyUpdate(guest_state, elapsed, dilated);
+    const auto path = hulk::ClassifyUpdate(guest_state, elapsed, dilated, presented);
     switch (path) {
         case hulk::UpdatePath::Paused6: ++stats.paused6; break;
         case hulk::UpdatePath::Paused7: ++stats.paused7; break;
         case hulk::UpdatePath::Nonpositive: ++stats.nonpositive; break;
         case hulk::UpdatePath::Dilated: ++stats.dilated; break;
+        case hulk::UpdatePath::Unpaced: ++stats.unpaced; break;
         case hulk::UpdatePath::Accumulator: ++stats.accumulator_calls; break;
     }
     const auto report = [&] {
         if (stats.window < 5) return;
         const uint64_t presents = gpu::g_visible_presents.load(std::memory_order_relaxed);
-        LOGI("world update: %.3f s calls=%u accumulator_calls=%u steps=%u dilated=%u state6=%u state7=%u elapsed_nonpositive=%u presents=%llu",
-             stats.window, stats.calls, stats.accumulator_calls, stats.steps, stats.dilated,
+        LOGI("world update: %.3f s calls=%u accumulator_calls=%u steps=%u dilated=%u unpaced=%u state6=%u state7=%u elapsed_nonpositive=%u presents=%llu",
+             stats.window, stats.calls, stats.accumulator_calls, stats.steps, stats.dilated, stats.unpaced,
              stats.paused6, stats.paused7, stats.nonpositive, static_cast<unsigned long long>(presents - stats.presents));
         if (stats.calls > stats.window * 240.0)
-            LOGI("world update high rate: state=%u elapsed=%.9g real_dt=%.9g scale=%llu calls_per_second=%.1f",
-                 guest_state, elapsed, real_dt, static_cast<unsigned long long>(scale), stats.calls / stats.window);
+            LOGI("world update high rate: state=%u elapsed=%.9g real_dt=%.9g scale=%llu presented=%u calls_per_second=%.1f",
+                 guest_state, elapsed, real_dt, static_cast<unsigned long long>(scale), unsigned(presented),
+                 stats.calls / stats.window);
         stats = {}; stats.presents = presents;
     };
     // Preserve the original paused/frontend branch and discard fractional time at transitions.
@@ -110,6 +116,22 @@ X86_FUNC(WORLD_UPDATE) {
     // dilated, run the console's way and keep the accumulator out of it.
     if (path == hulk::UpdatePath::Dilated) {
         clock.Reset();
+        report();
+        WORLD_UPDATE_ORIGINAL(ctx, base);
+        const uint32_t eax = ctx.eax;
+        hulk::cheats::RunAppliers(ctx, base);  // cheats.h: after the world's update, on its thread
+        ctx.eax = eax;
+        return;
+    }
+    // When a cutscene shot ends, the game holds its renderer (the render manager's byte +0x31, set by
+    // NISAnimationAction's end, USA 0x1A8EE0 / EU 0x1A9120) until the next shot starts. After a mission's last
+    // shot it stays held while the mission winds up, and the game loop comes straight back each pass with no swap
+    // and no app::Pace. The console ran this update on every one of those passes. Run 60 times a second instead,
+    // the wind-up of c00m02's escape held a frozen picture for 58 to 109 seconds in tests (issue #13), against
+    // about one second when every pass runs it. Passes that swapped no frame run the update once, with the time
+    // measured since the previous call plus whatever the clock still held.
+    if (path == hulk::UpdatePath::Unpaced) {
+        X86_MEM32(stack + 8) = std::bit_cast<uint32_t>(elapsed + clock.Drain());
         report();
         WORLD_UPDATE_ORIGINAL(ctx, base);
         const uint32_t eax = ctx.eax;
