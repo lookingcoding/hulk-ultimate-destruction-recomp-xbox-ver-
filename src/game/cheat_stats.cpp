@@ -205,8 +205,10 @@ void ApplyStats(const CheatState& state, X86Context& ctx, uint8_t*) {
             for (size_t i = 0; i < std::size(kSites); i++)
                 if (const uint32_t n = g_answers[i].exchange(0))
                     used += std::snprintf(answers + used, sizeof(answers) - used, " %X@%08X x%u", kSites[i].id, kSites[i].ret, n);
-            LOGI("cheats: power %.1f of %.1f, critical mass state %u, answered:%s", F32(player + kHealth), F32(player + kMaxHealth),
-                 unsigned(kernel::R32(player + kRageMode)), used ? answers : " none");
+            const uint32_t physics = kernel::R32(addr::kPhysicsWorld);
+            LOGI("cheats: power %.1f of %.1f, critical mass state %u, gravity %.0f, answered:%s", F32(player + kHealth),
+                 F32(player + kMaxHealth), unsigned(kernel::R32(player + kRageMode)), physics ? F32(physics + 0x14) : 0.0f,
+                 used ? answers : " none");
         }
     }
 }
