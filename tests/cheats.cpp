@@ -58,19 +58,19 @@ int main() {
 
     // settings.toml: toggles as bools, levelled cheats as integers, missing or invalid as off
     auto in = toml::parse("cheat_invulnerability = true\ncheat_damage = 2\ncheat_game_speed = 99\n"
-                          "cheat_regeneration = 'on'\ncheat_super_speed = 1\n");
+                          "cheat_regeneration = 'on'\ncheat_super_jump = 1\n");
     LoadCustomSettings(&in);
     const auto state = cheats::Current();
     Check(state[Cheat::Invulnerability] == 1 && state[Cheat::Damage] == 2 && state[Cheat::GameSpeed] == 3,
           "settings load booleans, levels and clamp levels");
-    Check(state[Cheat::Regeneration] == 0 && state[Cheat::InfiniteRage] == 0 && state[Cheat::SuperJump] == 0,
+    Check(state[Cheat::Regeneration] == 0 && state[Cheat::InfiniteRage] == 0 && state[Cheat::LowGravity] == 0,
           "missing or invalid keys load as off");
-    Check(state[Cheat::SuperSpeed] == 1, "an integer 1 loads a toggle as on");
+    Check(state[Cheat::SuperJump] == 1, "an integer 1 loads a toggle as on");
     toml::table out;
     SaveCustomSettings(&out);
     Check(out["cheat_invulnerability"].value<bool>() == true && out["cheat_damage"].value<int64_t>() == 2 &&
               out["cheat_game_speed"].value<int64_t>() == 3 && out["cheat_regeneration"].value<bool>() == false &&
-              out["cheat_super_speed"].value<bool>() == true,
+              out["cheat_super_jump"].value<bool>() == true,
           "settings save toggles as bools and levels as integers");
     for (size_t i = 0; i < cheats::kCheatCount; i++)
         Check(out.contains(cheats::Info(Cheat(i)).key), "every cheat is saved");

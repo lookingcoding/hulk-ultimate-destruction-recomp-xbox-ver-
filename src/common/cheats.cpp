@@ -20,7 +20,6 @@ constexpr CheatInfo kInfo[kCheatCount] = {
     {Cheat::GameSpeed, "cheat_game_speed", 4},
     {Cheat::SuperJump, "cheat_super_jump", 2},
     {Cheat::LowGravity, "cheat_low_gravity", 2},
-    {Cheat::SuperSpeed, "cheat_super_speed", 2},
     {Cheat::Regeneration, "cheat_regeneration", 2},
 };
 static_assert([] {

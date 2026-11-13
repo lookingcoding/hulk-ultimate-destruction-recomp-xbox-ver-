@@ -16,10 +16,9 @@ enum class Cheat : uint8_t {
     InfiniteHealth,   // his power never falls below normal full health
     Damage,           // the player's damage: normal, x2, x4, one-hit kills
     GameSpeed,        // the world's clock: normal, 75%, 50%, 25%
-    // movement and physics: game/cheat_movement.cpp (the issue-12-cheats-movement branch)
-    SuperJump,
+    // movement and physics
+    SuperJump,   // game/cheat_movement.cpp: the player's jumps three times as high
     LowGravity,  // the disc's own low gravity (unlockable 0x13), answered by game/cheat_stats.cpp's IsUnlockableOn hook
-    SuperSpeed,
     // more combat and stats (appended so earlier values keep their numbers)
     Regeneration,  // the disc's regenerator: faster health regeneration
     Count
@@ -64,7 +63,4 @@ void Load(Cheat cheat, int level);
 using Applier = void (*)(const CheatState& state, X86Context& ctx, uint8_t* base);
 bool RegisterApplier(const char* name, Applier applier);
 void RunAppliers(X86Context& ctx, uint8_t* base);  // game/simulation.cpp, after each world update step
-
-// The movement branch's entry point (game/cheat_movement.cpp), registered there with RegisterApplier.
-void ApplyMovement(const CheatState& state, X86Context& ctx, uint8_t* base);
 }  // namespace hulk::cheats

@@ -121,7 +121,6 @@ const Text kTexts[] = {
     {"TBS_PC_CHEAT_GAME_SPEED", {"Game Speed", "Vitesse du jeu", "Velocidad del juego", "Velocità di gioco"}},
     {"TBS_PC_SCALE_25", {"25%", "25 %", "25%", "25%"}},
     {"TBS_PC_CHEAT_SUPER_JUMP", {"Super Jump", "Super saut", "Supersalto", "Super salto"}},
-    {"TBS_PC_CHEAT_SUPER_SPEED", {"Super Speed", "Super vitesse", "Supervelocidad", "Super velocità"}},
     {"TBS_PC_CHEATS_MOVEMENT", {"Movement Cheats", "Triches de mouvement", "Trucos de movimiento", "Cheat di movimento"}},
 };
 
@@ -147,7 +146,6 @@ const CheatRow kCheatRows[] = {
      {"TBS_PC_SCALE_100", "TBS_PC_SCALE_75", "TBS_PC_SCALE_50", "TBS_PC_SCALE_25"}, 0},
     {Cheat::SuperJump, "SuperJump", "TBS_PC_CHEAT_SUPER_JUMP", kOffOn, 1},
     {Cheat::LowGravity, "LowGravity", "TBS_CHEAT_LOW_GRAVITY", kOffOn, 1},
-    {Cheat::SuperSpeed, "SuperSpeed", "TBS_PC_CHEAT_SUPER_SPEED", kOffOn, 1},
 };
 constexpr int kCheatRowCount = int(std::size(kCheatRows));
 constexpr const char* kCheatScreens[] = {"pc_cheats", "pc_cheats_movement"};

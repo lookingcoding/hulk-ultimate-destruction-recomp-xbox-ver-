@@ -8,6 +8,10 @@
 #include "xdk/hle.h"
 
 namespace {
+bool Audit() {
+    static const bool on = std::getenv("HULK_TEST_MOVEMENT_AUDIT") != nullptr;
+    return on;
+}
 uint32_t FindCharacter(uint32_t action, uint8_t* base) {
     const uint32_t owner = X86_MEM32(action + 0x1c);
     const uint32_t app = X86_MEM32(hulk::addr::kApp);
@@ -29,7 +33,7 @@ X86_EXTERN_FUNC(__imp__sub_00013B90);
 X86_FUNC(HULK_JUMP_START) {
     const uint32_t action = ctx.ecx;
     __imp__sub_00013B90(ctx, base);
-    if (std::getenv("HULK_TEST_MOVEMENT_AUDIT")) {
+    if (Audit()) {
         const uint32_t character = FindCharacter(action, base);
         LOGI("movement audit: jump action=%08x owner=%08x track=%08x active=%08x v=%.4f h=%.4f g=%.4f",
              action, uint32_t(X86_MEM32(action + 0x1c)), uint32_t(X86_MEM32(action + 0x20)),
@@ -46,7 +50,7 @@ X86_FUNC(HULK_JUMP_START) {
 X86_EXTERN_FUNC(__imp__sub_00018D40);
 X86_FUNC(HULK_JUMP_UPDATE) {
     const uint32_t action = ctx.ecx;
-    const bool audit = std::getenv("HULK_TEST_MOVEMENT_AUDIT") != nullptr;
+    const bool audit = Audit();
     const bool enabled = hulk::cheats::Level(hulk::cheats::Cheat::SuperJump) != 0;
     if (!audit && !enabled) { __imp__sub_00018D40(ctx, base); return; }
     uint32_t character = 0;

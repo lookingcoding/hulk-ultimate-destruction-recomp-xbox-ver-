@@ -235,7 +235,7 @@ int main(int argc, char** argv) {
               "the main menu's Cheats leads to the game's Code Input, the pause menu's has none");
         Check(page2.find("NamedValue \"PCCheatSuperJump\"") != std::string::npos &&
                   page2.find("text \"TBS_CHEAT_LOW_GRAVITY\"") != std::string::npos &&
-                  page2.find("NamedValue \"PCCheatSuperSpeed\"") != std::string::npos,
+                  page2.find("SuperSpeed") == std::string::npos,
               "the movement cheats' selectors");
         Check(page1.find("OnHighlight function \"PCCheatSync\"") != std::string::npos, "the cheat selectors sync on highlight");
         const char* last = main ? "AddTextButton \"FEsubMenu_text8\"" : "AddTextButton \"FEpause_text7\"";
@@ -291,8 +291,8 @@ int main(int argc, char** argv) {
     ctx.esp = 0x80000;
     hulk::RegisterDisplayCallbacks(ctx);
     Check(ctx.esp == 0x80000, "the guest's stack is as it was");
-    Check(kernel::registered.size() == 19, "eight selector callbacks, display sync, nine cheat callbacks and their sync");
-    if (kernel::registered.size() == 19) {
+    Check(kernel::registered.size() == 18, "eight selector callbacks, display sync, eight cheat callbacks and their sync");
+    if (kernel::registered.size() == 18) {
         Check(kernel::registered[1].first == "PCResolutionChanged", "named as the script names them");
         Check(kernel::registered[1].second == std::vector<uint32_t>({0x409B40, 0x101, 0xBBEC0}), "functor through the shared handler");
         Check(kernel::registered[6].first == "PCRenderDistanceChanged", "the render distance's");
@@ -303,8 +303,8 @@ int main(int argc, char** argv) {
                   kernel::registered[9].second == std::vector<uint32_t>({0x409B40, 0x120, 0xBBEC0}),
               "the cheats' callbacks through the shared handler");
         Check(kernel::registered[13].first == "PCCheatDamageChanged" && kernel::registered[13].second[1] == 0x124, "the damage's");
-        Check(kernel::registered[18].first == "PCCheatSync" &&
-                  kernel::registered[18].second == std::vector<uint32_t>({0x409B30, 0x11F, 0xB46B0}),
+        Check(kernel::registered[17].first == "PCCheatSync" &&
+                  kernel::registered[17].second == std::vector<uint32_t>({0x409B30, 0x11F, 0xB46B0}),
               "the cheats' sync through Print");
     }
     Check(!hulk::DisplaySync(ctx, 0x00123456), "a real Print owner goes to the game");
@@ -323,17 +323,17 @@ int main(int argc, char** argv) {
     kernel::widgets.clear();
     kernel::selections.clear();
     Check(hulk::DisplaySync(ctx, 0x11F) && ctx.esp == 0x80000 && ctx.ecx == 0xABCD, "the cheats' sync");
-    Check(kernel::widgets.size() == 9 && kernel::widgets[0] == "pc_cheat_Invulnerability_selector" &&
+    Check(kernel::widgets.size() == 8 && kernel::widgets[0] == "pc_cheat_Invulnerability_selector" &&
               kernel::widgets[4] == "pc_cheat_Damage_selector",
           "each cheat selector found by its name");
-    Check(kernel::selections.size() == 9 && kernel::selections[1].second == 1 && kernel::selections[4].second == 2 &&
+    Check(kernel::selections.size() == 8 && kernel::selections[1].second == 1 && kernel::selections[4].second == 2 &&
               kernel::selections[0].second == 0,
           "each set to its cheat's level");
     Check(hulk::DisplayCallback(0x124, 3) && hulk::cheats::Level(hulk::cheats::Cheat::Damage) == 3, "one-hit kills chosen");
     Check(hulk::DisplayCallback(0x120, 1) && hulk::cheats::Level(hulk::cheats::Cheat::Invulnerability) == 1, "invulnerability on");
     Check(hulk::DisplayCallback(0x120, 0) && hulk::cheats::Level(hulk::cheats::Cheat::Invulnerability) == 0, "and off again");
     Check(hulk::DisplayCallback(0x124, 7) && hulk::cheats::Level(hulk::cheats::Cheat::Damage) == 3, "a choice past a cheat's is ignored");
-    Check(!hulk::DisplayCallback(0x129, 1), "past the cheats' owners goes to the game");
+    Check(!hulk::DisplayCallback(0x128, 1), "past the cheats' owners goes to the game");
     Check(!hulk::DisplayCallback(0x00123456, 1), "a real AudioQuality owner goes to the game");
     Check(hulk::DisplayCallback(0x101, 5), "resolution selector");
     Check(app::settings.width == 3840 && app::settings.height == 2160, "3840 x 2160 chosen");

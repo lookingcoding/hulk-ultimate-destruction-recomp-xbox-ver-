@@ -42,7 +42,8 @@ constexpr Site kSites[] = {
     {addr::kRetLowGravityWorldOff, kLowGravity, Cheat::LowGravity},
 };
 
-std::atomic<uint8_t> g_levels[hulk::cheats::kCheatCount] = {};  // the update thread's last snapshot, for the hooks
+std::atomic<uint8_t> g_levels[hulk::cheats::kCheatCount] = {};
+std::atomic<uint32_t> g_answers[std::size(kSites)] = {};  // test logging: answers per site since the last report  // the update thread's last snapshot, for the hooks
 uint8_t LevelNow(Cheat c) { return g_levels[size_t(c)].load(std::memory_order_relaxed); }
 
 // The player's character: the app's actor manager (+0x20) and its main actor (+0x124), 0 outside the game
@@ -111,11 +112,14 @@ void ApplyPower(const CheatState& state, X86Context& ctx, uint32_t player) {
 // Game speed: the world clock's scale, through the game's own setter (critical moves slow it the same way). The
 // game's own scale is kept as the base: a scale the cheat did not write is the game's, and is scaled again.
 void ApplyGameSpeed(const CheatState& state, X86Context& ctx) {
-    static uint32_t written = 0, base = 0;
+    static uint32_t written = 0, base = 0, timer_seen = 0;
+    static uint8_t applied = 0;
     static bool active = false;
     const uint32_t app = kernel::R32(addr::kApp);
     const uint32_t timer = app ? kernel::R32(app + 0x58) : 0;
-    if (!timer) { active = false; return; }
+    if (!timer || timer != timer_seen) active = false;  // a new clock starts at the game's own scale
+    timer_seen = timer;
+    if (!timer) return;
     constexpr float kFactor[] = {1.0f, 0.75f, 0.5f, 0.25f};
     const uint8_t level = state[Cheat::GameSpeed];
     const uint32_t raw = kernel::R32(timer + 0x38);
@@ -131,9 +135,10 @@ void ApplyGameSpeed(const CheatState& state, X86Context& ctx) {
         LOGI("cheats: game speed back to the game's %.3f", base / 65536.0);
         return;
     }
-    if (active && raw == written) return;
+    if (active && raw == written && level == applied) return;
     kernel::CallGuest(call, addr::kTimerSetScale, {std::bit_cast<uint32_t>(scale)});
     written = kernel::R32(timer + 0x38);
+    applied = level;
     active = true;
     LOGI("cheats: game speed %.3f x %.2f = %.3f", base / 65536.0, kFactor[level], written / 65536.0);
 }
@@ -190,7 +195,20 @@ void ApplyStats(const CheatState& state, X86Context& ctx, uint8_t*) {
     if (!player) return;
     Probe(player);
     ApplyPower(state, ctx, player);
-    if (Logging()) LogRageState(player);
+    if (Logging()) {
+        LogRageState(player);
+        // every two seconds: the player's power, and how often each disc cheat check was answered
+        static unsigned steps = 0;
+        if (++steps % 120 == 0) {
+            char answers[256] = "";
+            size_t used = 0;
+            for (size_t i = 0; i < std::size(kSites); i++)
+                if (const uint32_t n = g_answers[i].exchange(0))
+                    used += std::snprintf(answers + used, sizeof(answers) - used, " %X@%08X x%u", kSites[i].id, kSites[i].ret, n);
+            LOGI("cheats: power %.1f of %.1f, critical mass state %u, answered:%s", F32(player + kHealth), F32(player + kMaxHealth),
+                 unsigned(kernel::R32(player + kRageMode)), used ? answers : " none");
+        }
+    }
 }
 const bool g_registered = hulk::cheats::RegisterApplier("stats", &ApplyStats);
 }  // namespace
@@ -201,10 +219,7 @@ X86_FUNC(HULK_SUB_IS_UNLOCKABLE_ON) {
     const uint32_t ret = X86_MEM32(ctx.esp), id = X86_MEM32(ctx.esp + 4);
     for (const Site& s : kSites) {
         if (s.ret != ret || s.id != id || !LevelNow(s.cheat)) continue;
-        if (Logging()) {
-            static unsigned logged = 0;
-            if (logged++ < 40) LOGI("cheats: unlockable %X answered on at %08X", id, ret);
-        }
+        if (Logging()) g_answers[&s - kSites].fetch_add(1, std::memory_order_relaxed);
         ctx.eax = (ctx.eax & ~0xFFu) | 1;
         ctx.esp += 8;
         return;
@@ -229,6 +244,12 @@ X86_FUNC(HULK_SUB_APPLY_DAMAGE) {
     if (scaled != amount) X86_MEM32(ctx.esp + 4) = std::bit_cast<uint32_t>(scaled);
     const float before = victim ? F32(victim + kHealth) : 0;
     HULK_IMP(HULK_SUB_APPLY_DAMAGE)(ctx, base);
+    if (Logging() && !by_player && victim != player && hit) {
+        static unsigned others = 0;
+        if (others++ < 40)
+            LOGI("cheats: damage to %08X amount %.2f, hit type %u attacker %08X (player %08X)", victim, amount,
+                 unsigned(X86_MEM32(hit + 0xC)), unsigned(X86_MEM32(hit + 8)), player);
+    }
     if (Logging() && (by_player || (player && victim == player))) {
         static unsigned logged = 0;
         if (logged++ < 200)
