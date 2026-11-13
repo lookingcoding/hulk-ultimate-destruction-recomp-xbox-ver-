@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include "common/simulation.h"
 #include "common/addresses.h"
+#include "common/cheats.h"
 #include "core/log.h"
 #include "gpu/backend.h"
 #include "xdk/hle.h"
@@ -111,6 +112,9 @@ X86_FUNC(WORLD_UPDATE) {
         clock.Reset();
         report();
         WORLD_UPDATE_ORIGINAL(ctx, base);
+        const uint32_t eax = ctx.eax;
+        hulk::cheats::RunAppliers(ctx, base);  // cheats.h: after the world's update, on its thread
+        ctx.eax = eax;
         return;
     }
     const unsigned steps = clock.Advance(elapsed);
@@ -133,5 +137,8 @@ X86_FUNC(WORLD_UPDATE) {
         X86_MEM32(stack + 4) = state;
         X86_MEM32(stack + 8) = std::bit_cast<uint32_t>(hulk::SimulationClock::kStep);
         WORLD_UPDATE_ORIGINAL(ctx, base);
+        const uint32_t eax = ctx.eax;
+        hulk::cheats::RunAppliers(ctx, base);  // cheats.h: after the world's update, on its thread
+        ctx.eax = eax;
     }
 }

@@ -26,8 +26,14 @@ std::string g_renderer = "auto";
 void LoadCustomSettings(const void* table_ptr) {
     if (!table_ptr) return;
     const auto& t = *static_cast<const toml::table*>(table_ptr);
-    if (auto v = t["cheat_invulnerability"].value<bool>()) LoadInvulnerabilityPreference(*v ? 1 : 0);
-    else LoadInvulnerabilityPreference(-1);
+    // Options -> Cheats (cheats.h): a toggle as a bool, a cheat with more levels as its level; missing is off
+    for (size_t i = 0; i < cheats::kCheatCount; i++) {
+        const cheats::CheatInfo& info = cheats::Info(cheats::Cheat(i));
+        int level = 0;
+        if (auto b = t[info.key].value_exact<bool>()) level = *b ? 1 : 0;
+        else if (auto n = t[info.key].value_exact<int64_t>()) level = int(std::clamp<int64_t>(*n, 0, info.levels - 1));
+        cheats::Load(info.cheat, level);
+    }
     if (auto v = t["mouse_sensitivity"].value<double>()) {
         SetMouseSensitivity(static_cast<float>(*v));
     }
@@ -66,8 +72,6 @@ void LoadCustomSettings(const void* table_ptr) {
 void SaveCustomSettings(void* table_ptr) {
     if (!table_ptr) return;
     auto& t = *static_cast<toml::table*>(table_ptr);
-    if (const int cheat = InvulnerabilityPreference(); cheat >= 0)
-        t.insert_or_assign("cheat_invulnerability", cheat != 0);
     t.insert_or_assign("mouse_sensitivity", GetMouseSensitivity());
     t.insert_or_assign("mouse_invert_y", GetMouseInvertY());
     t.insert_or_assign("mouse_smoothing", GetMouseSmoothing());
@@ -79,6 +83,12 @@ void SaveCustomSettings(void* table_ptr) {
     t.insert_or_assign("camera_distance", int64_t(GetCameraDistance()));
     t.insert_or_assign("language", std::string(LanguageName(GetLanguage())));
     t.insert_or_assign("renderer", g_renderer);
+    for (size_t i = 0; i < cheats::kCheatCount; i++) {
+        const cheats::CheatInfo& info = cheats::Info(cheats::Cheat(i));
+        const int level = cheats::Level(info.cheat);
+        if (info.levels == 2) t.insert_or_assign(info.key, level != 0);
+        else t.insert_or_assign(info.key, int64_t(level));
+    }
 }
 
 }  // namespace hulk

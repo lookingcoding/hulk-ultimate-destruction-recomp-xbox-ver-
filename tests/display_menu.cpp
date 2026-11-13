@@ -259,9 +259,9 @@ int main(int argc, char** argv) {
         Check(kernel::registered[9].first == "PCCheatEnter" && kernel::registered[10].first == "PCCheatExit",
               "cheat screen events are registered");
     }
-    Check(!hulk::CheatScreenActive(), "startup is outside the cheat screen");
-    Check(hulk::DisplaySync(ctx, 0x109) && hulk::CheatScreenActive(), "enter enables preference recording");
-    Check(hulk::DisplaySync(ctx, 0x10a) && !hulk::CheatScreenActive(), "exit disables preference recording");
+    Check(!hulk::cheats::ScreenActive(), "startup is outside the cheat screen");
+    Check(hulk::DisplaySync(ctx, 0x109) && hulk::cheats::ScreenActive(), "enter enables preference recording");
+    Check(hulk::DisplaySync(ctx, 0x10a) && !hulk::cheats::ScreenActive(), "exit disables preference recording");
     Check(!hulk::DisplaySync(ctx, 0x00123456), "a real Print owner goes to the game");
     ctx.ecx = 0xABCD;
     Check(hulk::DisplaySync(ctx, 0x108), "the sync");

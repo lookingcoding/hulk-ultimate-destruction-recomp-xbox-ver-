@@ -27,9 +27,6 @@ inline constexpr uint32_t kFiberTlsIndex = 0x004E5A9C;
 inline constexpr uint32_t kSwitchToFiber = 0x0035551D, kDeleteFiber = 0x0035550A, kFiberBootstrap = 0x00355439;
 inline constexpr uint32_t kHintBegin = 0x000CE700;            // hud_triggerButtonHintBegin
 #define HULK_SUB_FE_CALLBACKS sub_000C43A0  // the frontend's callbacks object
-#define HULK_SUB_CHEAT_INVUL sub_000BBDF0
-#define HULK_SUB_CHEAT_SYNC sub_000BC0B0
-#define HULK_SUB_LOAD_PROFILE sub_0008A8F0
 inline constexpr uint32_t kCheatInvulHandler = 0x000BBDF0;
 inline constexpr uint32_t kSetUnlockableOn = 0x00092870;
 #define HULK_SUB_AUDIO_QUALITY sub_000BBD10
@@ -74,9 +71,6 @@ inline constexpr uint32_t kFiberTlsIndex = 0x004E7BDC;
 inline constexpr uint32_t kSwitchToFiber = 0x00350EBD, kDeleteFiber = 0x00350EAA, kFiberBootstrap = 0x00350DD9;
 inline constexpr uint32_t kHintBegin = 0x000CE870;            // hud_triggerButtonHintBegin
 #define HULK_SUB_FE_CALLBACKS sub_000C4500
-#define HULK_SUB_CHEAT_INVUL sub_000BBFA0
-#define HULK_SUB_CHEAT_SYNC sub_000BC260
-#define HULK_SUB_LOAD_PROFILE sub_0008A990
 inline constexpr uint32_t kCheatInvulHandler = 0x000BBFA0;
 inline constexpr uint32_t kSetUnlockableOn = 0x00092910;
 #define HULK_SUB_AUDIO_QUALITY sub_000BBEC0

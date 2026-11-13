@@ -21,85 +21,13 @@
 #include "kernel/kernel.h"
 #include "xdk/hle.h"
 
-namespace {
-thread_local bool g_restoring_cheat = false;
-std::atomic<bool> g_initial_cheat_pending{false};
-
-// Use the same native frontend callback the disc uses, once the frontend exists. It checks
-// its own manager for null; the setting is optional so existing save/cheat state is untouched
-// until the player explicitly changes this PC control.
-void RestoreInvulnerability(X86Context& ctx, uint32_t owner) {
-    const int preference = hulk::InvulnerabilityPreference();
-    if (!hulk::CheatsAvailable() || preference < 0 || !owner) return;
-    struct Guard { Guard() { g_restoring_cheat = true; } ~Guard() { g_restoring_cheat = false; } } guard;
-    X86Context call = ctx;
-    call.ecx = owner;
-    kernel::CallGuest(call, hulk::addr::kCheatInvulHandler, {preference ? 0u : 1u});
-}
-
-}
-
 // the frontend's callbacks object (thiscall, owner; ret 4): registers each function the FE scripts name, then the
 // display options' selectors (display_menu.cpp)
 X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_CALLBACKS));
 X86_FUNC(HULK_SUB_FE_CALLBACKS) {
-    const uint32_t owner = ctx.ecx;
-    hulk::SetCheatScreenActive(false);
-    g_initial_cheat_pending.store(hulk::InvulnerabilityPreference() >= 0);
+    hulk::cheats::SetScreenActive(false);
     HULK_IMP(HULK_SUB_FE_CALLBACKS)(ctx, base);
     hulk::RegisterDisplayCallbacks(ctx);
-    RestoreInvulnerability(ctx, owner);
-}
-
-X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_CHEAT_INVUL));
-X86_FUNC(HULK_SUB_CHEAT_INVUL) {
-    const uint32_t stack = ctx.esp;
-    const uint32_t value = X86_MEM32(ctx.esp + 4);
-    const int preference = hulk::InvulnerabilityPreference();
-    const uint32_t frontend = ctx.ecx ? kernel::R32(ctx.ecx + 4) : 0;
-    const bool manager_ready = frontend && kernel::R32(frontend + 0x4c);
-    if (!g_restoring_cheat && !hulk::CheatScreenActive() && hulk::CheatsAvailable() &&
-        preference >= 0 && manager_ready && g_initial_cheat_pending.exchange(false)) {
-        // The script initializes its named value after the callback object is constructed.
-        // Give that first native callback the saved preference instead of the disc default.
-        struct RestoreArgument {
-            uint8_t* base;
-            uint32_t address, value;
-            ~RestoreArgument() { std::memcpy(base + address, &value, sizeof(value)); }
-        } restore{base, stack + 4, value};
-        X86_MEM32(stack + 4) = preference ? 0u : 1u;
-        HULK_IMP(HULK_SUB_CHEAT_INVUL)(ctx, base);
-        return;
-    }
-    HULK_IMP(HULK_SUB_CHEAT_INVUL)(ctx, base);
-    if (!g_restoring_cheat && value <= 1 && hulk::CheatsAvailable() && hulk::CheatScreenActive())
-        hulk::InvulnerabilitySelected(value == 0);
-}
-
-X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_CHEAT_SYNC));
-X86_FUNC(HULK_SUB_CHEAT_SYNC) {
-    RestoreInvulnerability(ctx, ctx.ecx);
-    g_initial_cheat_pending.store(false);
-    struct Guard { Guard() { g_restoring_cheat = true; } ~Guard() { g_restoring_cheat = false; } } guard;
-    HULK_IMP(HULK_SUB_CHEAT_SYNC)(ctx, base);
-}
-
-// Profile loading restores the game's on/off bitset, including this cheat. Apply an explicit
-// PC preference afterwards, using the same native unlockable setter, without touching unlocks.
-X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_LOAD_PROFILE));
-X86_FUNC(HULK_SUB_LOAD_PROFILE) {
-    const uint32_t flow = X86_MEM32(ctx.esp + 8);
-    HULK_IMP(HULK_SUB_LOAD_PROFILE)(ctx, base);
-    const int preference = hulk::InvulnerabilityPreference();
-    if ((ctx.eax & 0xffu) && flow && preference >= 0 && hulk::CheatsAvailable()) {
-        const uint32_t manager = kernel::R32(flow + 0x3c);
-        if (manager) {
-            X86Context call = ctx;
-            call.ecx = manager;
-            kernel::CallGuest(call, hulk::addr::kSetUnlockableOn, {0x2e4, uint32_t(preference)});
-            g_initial_cheat_pending.store(false);
-        }
-    }
 }
 
 // AudioQualityChanged (thiscall, int; ret 4): only PS2 and GameCube scripts name it, the display options' selectors

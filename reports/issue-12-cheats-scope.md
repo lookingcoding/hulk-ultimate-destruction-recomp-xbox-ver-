@@ -7,3 +7,32 @@ The checked-in `config/game.toml`, `config/game_usa.toml`, and `src/common/addre
 The shipped frontend contains a `CheatAllMoves` named value and `CheatAllMovesChanged` callback (see existing `D:/Projects/Build Cache/Hulk Recompiled/scratch/issue10-audit2/manual-cheat-api-evidence.txt`); whether the release callback is usable and its save effects remain unverified. No safe address, ownership, ABI, lifecycle or region mapping was established for a host-controlled cheat. Infinite adrenaline, one-hit destruction and super jumps have no identified implementation here.
 
 Next, reverse engineer and validate the game's existing cheat callbacks or a gameplay-thread Lua invocation bridge for both executable regions. Establish player creation/destruction, restart, mission transitions, toggling off, and save behavior before wiring the existing display-menu style selectors and persistent settings. Test the overlay and settings headlessly, then test actual effects and reversibility in both regions using disposable saves. A broader cheats menu also needs individual behavior and progression semantics established for each cheat.
+
+## Shared cheat interface (issue-12-cheats-menu, for the movement branch)
+
+`src/common/cheats.h` is the contract between the cheats menu (this branch) and the movement cheats
+(`issue-12-cheats-movement`). Build against it; do not edit it on the movement branch. If a cheat needs another
+setting, list it in the movement report and it is added here at merge time.
+
+- `enum class hulk::cheats::Cheat`: `Invulnerability, InfiniteRage, InfiniteHealth, Damage, NoHeat, GameSpeed`
+  (this branch) and `SuperJump, LowGravity, SuperSpeed` (movement branch).
+- Every cheat is a level, `0` = off. `SuperJump`, `LowGravity` and `SuperSpeed` are off/on toggles (levels 0 and 1);
+  the strength used at level 1 is the movement code's choice.
+- `CheatState`: a snapshot of every level; `state[Cheat::SuperJump]`, `state.On(Cheat::LowGravity)`.
+- settings.toml keys (written by `settings_ui.cpp`): `cheat_invulnerability`, `cheat_infinite_rage`,
+  `cheat_infinite_health`, `cheat_damage` (0-3), `cheat_no_heat`, `cheat_game_speed` (0-3), `cheat_super_jump`,
+  `cheat_low_gravity`, `cheat_super_speed`. Toggles are bools, levelled cheats integers; missing means off.
+- Appliers: `using Applier = void (*)(const CheatState&, X86Context& ctx, uint8_t* base)`.
+  `RegisterApplier(name, fn)` from a static initializer; `game/simulation.cpp` calls `RunAppliers` on the guest's
+  update thread after every world update step (60 Hz accumulator steps and the critical-move slow-motion path),
+  always, also when every cheat is off. An applier must put the game back when its cheat is off, find the player
+  again on every call (the world is remade between missions, on restart and in the frontend), and use a copy of
+  `ctx` for any guest call (`ctx.esp` is the update's caller's stack after the update returned).
+- Movement entry point: `void hulk::cheats::ApplyMovement(const CheatState&, X86Context&, uint8_t* base)`, defined
+  in `src/game/cheat_movement.cpp` and registered there, for example
+  `static const bool registered = hulk::cheats::RegisterApplier("movement", &hulk::cheats::ApplyMovement);`.
+  Region addresses go in `src/common/cheat_movement_addresses.h` under `#ifdef HULK_USA` like `addresses.h`.
+- Game sources are compiled per region: `src/game/*.cpp` for HulkRecompiled (EU) and `src/game_usa/*.cpp` for
+  HulkRecompiledUSA. The movement branch also adds the two-line `src/game_usa/cheat_movement.cpp`
+  (`#include "game/cheat_movement.cpp"`), as `src/game_usa/hooks.cpp` does for hooks.
+- Menu labels, the Options -> Cheats screen and its four languages belong to this branch (`display_menu.cpp`).

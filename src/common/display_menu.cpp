@@ -837,7 +837,7 @@ void RegisterDisplayCallbacks(X86Context& ctx) {
 
 bool DisplaySync(X86Context& ctx, uint32_t owner) {
     if (owner == kOwnerBase + kSettings + 1 || owner == kOwnerBase + kSettings + 2) {
-        SetCheatScreenActive(owner == kOwnerBase + kSettings + 1);
+        cheats::SetScreenActive(owner == kOwnerBase + kSettings + 1);
         return true;
     }
     if (owner != kOwnerBase + kSettings) return false;
