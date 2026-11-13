@@ -43,6 +43,10 @@ The game checks your disc image when it starts and tells you if it can't use it.
   - **Language (restart):** English, Français, Español, Italiano. The game reads it once at start, so restart after changing it. French and Italian have their own voices; Spanish has Spanish text with English voices, as on the disc. `settings.toml`: `language = "english" | "french" | "spanish" | "italian"`.
 - `settings.toml` also takes `aspect = "auto" | "4:3" | "16:9"`: the game draws 4:3, so on a widescreen output `"4:3"` shows it pillarboxed instead of stretched (the automatic default reports a widescreen TV to the game, which this title does not use).
   - Changes apply once the selection settles and persist in `settings.toml`. The game's files are not modified: the runtime serves edited `frontend\fe_real.txt` (main menu), `frontend\fe_run.txt` (pause menu) and string tables through a view of `misc.rcf` (see `src/common/display_menu.cpp`).
+- **Cheats in the game's Options menu:** a **Cheats** screen next to Display Options, in all four languages. Each cheat switches on and off at any time and is kept in `settings.toml`; none of them writes unlocks or progress to your save.
+  - **Invulnerability**, **Infinite Rage** (the rage meter stays full), **Infinite Health**, **Fast Regeneration**.
+  - **Hulk Damage:** normal, 2x, 4x or one-hit kills. **Game Speed:** normal, half or quarter speed.
+  - **Movement Cheats:** **Super Jump** (about three times as high) and **Low Gravity**.
 - **Mod Support:**
   - Put each mod in its own folder inside `mods` (next to `assets`; the game creates it with a `README.txt` on first launch). A file in a mod's folder replaces the game's file with the same path, even inside the `.rcf` archives: `mods\My Modrontend\lang\str_en.txt` replaces the English text table inside `misc.rcf`, `mods\My Modrt\copyright-en.p3d` replaces that model inside `art.rcf`. A disc-level path such as `mods\My Mod\misc.rcf` replaces the whole archive.
   - `Hulk Mod Tool.exe` copies every file out of your game (17,415 files, about 2.8 GB) into `Game Files`, with the paths mods use and a `file list.txt` saying which archive holds each one.
