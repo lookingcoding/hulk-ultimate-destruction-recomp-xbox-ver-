@@ -109,6 +109,8 @@ int main(int argc, char** argv) {
     hulk::SetFovIncrease(15);
     hulk::SetRenderDistance(250);  // not a choice: Custom
     hulk::SetLanguage(hulk::Language::Spanish);
+    hulk::cheats::Load(hulk::cheats::Cheat::Damage, 2);  // x4
+    hulk::cheats::Load(hulk::cheats::Cheat::InfiniteRage, 1);
 
     Check(!hulk::GameFileView("D:\\art.rcf", own.size(), read), "only misc.rcf gets a view");
     auto view = hulk::GameFileView("D:\\misc.rcf", own.size(), read);
@@ -147,10 +149,16 @@ int main(int argc, char** argv) {
     // the European disc has five string tables, the North American one English only
     Check(scripts.size() == 2 && (tables.size() == 5 || tables.size() == 1) && moved == scripts.size() + tables.size(),
           "fe_real.txt, fe_run.txt and each string table moved");
+    bool french_cheats = false;
     for (const std::string& t : tables) {
         Check(t.find("TBS_PC_DISPLAY_OPTIONS\t") != std::string::npos, "string tables have the menu's keys");
+        Check(t.find("TBS_PC_CHEAT_INFINITE_RAGE\t") != std::string::npos && t.find("TBS_PC_CHEATS_MOVEMENT\t") != std::string::npos &&
+                  t.find("TBS_PC_DAMAGE_ONE_HIT\t") != std::string::npos && t.find("TBS_PC_SCALE_25\t") != std::string::npos,
+              "string tables have the cheats' keys");
+        french_cheats |= t.find("TBS_PC_CHEAT_INFINITE_RAGE\tRage infinie") != std::string::npos;
         Check(t.find("TBS_MENU_ITEM_OM_CAMERA_OPTIONS\t") != std::string::npos, "string tables keep their own");
     }
+    Check(tables.size() == 1 || french_cheats, "the cheats' lines in each language");
     // without a controller the prompts are the keyboard's; the map legend's icons stay
     Check(tables[0].find("press [Q] to pick it up") != std::string::npos && tables[0].find("\\bus") == std::string::npos &&
               tables[0].find("\\bmh Hulk") != std::string::npos,
@@ -186,28 +194,59 @@ int main(int argc, char** argv) {
     Check(std::memcmp(back.data(), rcf.data(), back.size()) == 0, "back to the keyboard's prompts");
     std::string main_menu, pause_menu;
     for (const std::string& s : scripts) (s.find("AddScreen \"main\"") != std::string::npos ? main_menu : pause_menu) = s;
-    const size_t extras = main_menu.find("AddScreen \"extras\"");
-    const size_t cheat_row = main_menu.find("AddTextButton \"FEmain_right_item1\"", extras);
-    const size_t cheat_screen = main_menu.find("AddScreen \"dev_cheats\"");
-    const size_t options_screen = main_menu.find("AddScreen \"options\"", cheat_screen);
-    Check(extras != std::string::npos && cheat_row != std::string::npos && cheat_row < cheat_screen &&
-              main_menu.find("OnSelect gotoscreen \"dev_cheats\"", cheat_row) < cheat_screen,
-          "Extras opens the native cheats screen from a navigable slot");
-    if (cheat_screen != std::string::npos && options_screen != std::string::npos) {
-        const std::string cheats = main_menu.substr(cheat_screen, options_screen - cheat_screen);
-        Check(cheats.find("NamedValue \"CheatInvulnerability\"") != std::string::npos &&
-                  cheats.find("name \"cheat_invulnerability_selector\"") != std::string::npos &&
-                  cheats.find("TBS_MENU_ITEM_CHOICE_ON TBS_MENU_ITEM_CHOICE_OFF") != std::string::npos,
-              "cheats screen uses the game's on/off selector");
-        Check(cheats.find("CheatAllMoves") == std::string::npos && cheats.find("DoUnlockChapterMoves") == std::string::npos &&
-                  cheats.find("UnlockAllBonus") == std::string::npos,
-              "unverified and progression-changing developer controls are absent");
-        Check(cheats.find("OnSelect gotoscreen \"cheats\"") != std::string::npos,
-              "the game's code-input screen remains reachable");
-        Check(cheats.find("OnTransitionInStart function \"PCCheatEnter\"") != std::string::npos &&
-                  cheats.find("OnTransitionOutStartBackward function \"PCCheatExit\"") != std::string::npos,
-              "the cheat screen scopes preference recording to its lifetime");
-    } else Check(false, "the native cheats screen exists");
+    // Options > Cheats (cheats.h): a row after Display Options, two screens of selectors, levels as they are
+    for (const std::string* script : {&main_menu, &pause_menu}) {
+        const bool main = script == &main_menu;
+        const size_t options = script->find("AddScreen \"options\"");
+        const size_t row = script->find("        text \"TBS_MENU_ITEM_SF_CHEATS\" 1\r\n        OnSelect gotoscreen \"pc_cheats\"");
+        Check(options < row && row < script->find("AddScreen", options + 1), "its Options screen has a Cheats row");
+        Check(script->find(main ? "AddTextButton \"FEmain_left_item6\"\r\n    {\r\n        text \"TBS_MENU_ITEM_SF_CHEATS\""
+                                : "AddTextButton \"FEpause_text5\"\r\n    {\r\n        text \"TBS_MENU_ITEM_SF_CHEATS\"") != std::string::npos,
+              "the Cheats row's slot follows Display Options'");
+        const size_t first = script->find("AddScreen \"pc_cheats\""), second = script->find("AddScreen \"pc_cheats_movement\"");
+        Check(first != std::string::npos && second != std::string::npos && first < second &&
+                  second < script->find("AddScreen \"camera_options\""),
+              "both cheat screens are before Camera Options");
+        if (first == std::string::npos || second == std::string::npos) continue;
+        const std::string page1 = script->substr(first, second - first);
+        const std::string page2 = script->substr(second, script->find("AddScreen", second + 1) - second);
+        Check(script->find("AddNamedValueInt \"PCCheatDamage\" 2 \"PCCheatDamageChanged\"") != std::string::npos &&
+                  script->find("AddNamedValueInt \"PCCheatInfiniteRage\" 1 \"PCCheatInfiniteRageChanged\"") != std::string::npos &&
+                  script->find("AddNamedValueInt \"PCCheatInvulnerability\" 0 \"PCCheatInvulnerabilityChanged\"") != std::string::npos,
+              "the cheats' named values start at their levels");
+        Check(page1.find("text \"TBS_CHEAT_INVULNERABILITY\"") != std::string::npos &&
+                  page1.find("NamedValue \"PCCheatInfiniteRage\"") != std::string::npos &&
+                  page1.find("NamedValue \"PCCheatInfiniteHealth\"") != std::string::npos &&
+                  page1.find("NamedValue \"PCCheatRegeneration\"") != std::string::npos &&
+                  page1.find("TBS_CHEAT_RENDER_MODE_NORMAL TBS_PC_DAMAGE_X2 TBS_PC_DAMAGE_X4 TBS_PC_DAMAGE_ONE_HIT") != std::string::npos &&
+                  page1.find("TBS_PC_SCALE_100 TBS_PC_SCALE_75 TBS_PC_SCALE_50 TBS_PC_SCALE_25") != std::string::npos,
+              "the combat cheats' selectors and choices");
+        Check(page1.find("TextSelection \"\" TBS_MENU_ITEM_CHOICE_OFF TBS_MENU_ITEM_CHOICE_ON\r\n        NamedValue \"PCCheatInvulnerability\"") !=
+                  std::string::npos,
+              "a toggle's choices are in level order, off first");
+        Check(page1.find("OnSelect gotoscreen \"pc_cheats_movement\"") != std::string::npos, "Cheats leads to Movement Cheats");
+        Check((page1.find("OnSelect gotoscreen \"cheats\"") != std::string::npos) == main,
+              "the main menu's Cheats leads to the game's Code Input, the pause menu's has none");
+        Check(page2.find("NamedValue \"PCCheatSuperJump\"") != std::string::npos &&
+                  page2.find("text \"TBS_CHEAT_LOW_GRAVITY\"") != std::string::npos &&
+                  page2.find("NamedValue \"PCCheatSuperSpeed\"") != std::string::npos,
+              "the movement cheats' selectors");
+        Check(page1.find("OnHighlight function \"PCCheatSync\"") != std::string::npos, "the cheat selectors sync on highlight");
+        const char* last = main ? "AddTextButton \"FEsubMenu_text8\"" : "AddTextButton \"FEpause_text7\"";
+        Check(page1.find(last) != std::string::npos && page1.find(main ? "FEsubMenu_text9" : "FEpause_text8") == std::string::npos,
+              "the Cheats screen fits the screen's slots");
+        Check(page1.find("CheatAllMoves") == std::string::npos && page1.find("UnlockAll") == std::string::npos &&
+                  page1.find("AwardCheatersSmashPoints") == std::string::npos && page2.find("Award") == std::string::npos,
+              "no unlock or progression controls");
+    }
+    // the disc's developer cheat screen (unlock-all buttons) is only reached from its non-release builds' Extras row
+    size_t dev_links = 0;
+    for (size_t at = main_menu.find("gotoscreen \"dev_cheats\""); at != std::string::npos;
+         at = main_menu.find("gotoscreen \"dev_cheats\"", at + 1))
+        dev_links++;
+    Check(dev_links == 1 && main_menu.rfind("ifbuild DEBUG TUNE RELEASE", main_menu.find("gotoscreen \"dev_cheats\"")) >
+                                main_menu.find("AddScreen \"extras\""),
+          "the disc's developer cheat screen keeps only its own debug-build link");
     for (const std::string* script : {&main_menu, &pause_menu}) {
         Check(script->find("AddScreen \"display_options\"") != std::string::npos, "each script has the Display Options screen");
         size_t options = script->find("AddScreen \"options\"");
@@ -248,20 +287,22 @@ int main(int argc, char** argv) {
     ctx.esp = 0x80000;
     hulk::RegisterDisplayCallbacks(ctx);
     Check(ctx.esp == 0x80000, "the guest's stack is as it was");
-    Check(kernel::registered.size() == 11, "eight selector callbacks, display sync and cheat screen events");
-    if (kernel::registered.size() == 11) {
+    Check(kernel::registered.size() == 19, "eight selector callbacks, display sync, nine cheat callbacks and their sync");
+    if (kernel::registered.size() == 19) {
         Check(kernel::registered[1].first == "PCResolutionChanged", "named as the script names them");
         Check(kernel::registered[1].second == std::vector<uint32_t>({0x409B40, 0x101, 0xBBEC0}), "functor through the shared handler");
         Check(kernel::registered[6].first == "PCRenderDistanceChanged", "the render distance's");
         Check(kernel::registered[7].first == "PCLanguageChanged", "the language's");
         Check(kernel::registered[8].first == "PCDisplaySync", "the sync");
         Check(kernel::registered[8].second == std::vector<uint32_t>({0x409B30, 0x108, 0xB46B0}), "sync through Print");
-        Check(kernel::registered[9].first == "PCCheatEnter" && kernel::registered[10].first == "PCCheatExit",
-              "cheat screen events are registered");
+        Check(kernel::registered[9].first == "PCCheatInvulnerabilityChanged" &&
+                  kernel::registered[9].second == std::vector<uint32_t>({0x409B40, 0x120, 0xBBEC0}),
+              "the cheats' callbacks through the shared handler");
+        Check(kernel::registered[13].first == "PCCheatDamageChanged" && kernel::registered[13].second[1] == 0x124, "the damage's");
+        Check(kernel::registered[18].first == "PCCheatSync" &&
+                  kernel::registered[18].second == std::vector<uint32_t>({0x409B30, 0x11F, 0xB46B0}),
+              "the cheats' sync through Print");
     }
-    Check(!hulk::cheats::ScreenActive(), "startup is outside the cheat screen");
-    Check(hulk::DisplaySync(ctx, 0x109) && hulk::cheats::ScreenActive(), "enter enables preference recording");
-    Check(hulk::DisplaySync(ctx, 0x10a) && !hulk::cheats::ScreenActive(), "exit disables preference recording");
     Check(!hulk::DisplaySync(ctx, 0x00123456), "a real Print owner goes to the game");
     ctx.ecx = 0xABCD;
     Check(hulk::DisplaySync(ctx, 0x108), "the sync");
@@ -274,6 +315,21 @@ int main(int argc, char** argv) {
     Check(kernel::selections == std::vector<std::pair<uint32_t, uint32_t>>({{0x40010, 1}, {0x40020, 3}, {0x40030, 6}, {0x40040, 0}, {0x40050, 2},
                                                                                  {0x40060, 3}, {0x40070, 5}, {0x40080, 2}}),
           "each set to the current setting");
+    // the cheats' sync sets each cheat selector of the screen to its level; a choice selects the level and saves
+    kernel::widgets.clear();
+    kernel::selections.clear();
+    Check(hulk::DisplaySync(ctx, 0x11F) && ctx.esp == 0x80000 && ctx.ecx == 0xABCD, "the cheats' sync");
+    Check(kernel::widgets.size() == 9 && kernel::widgets[0] == "pc_cheat_Invulnerability_selector" &&
+              kernel::widgets[4] == "pc_cheat_Damage_selector",
+          "each cheat selector found by its name");
+    Check(kernel::selections.size() == 9 && kernel::selections[1].second == 1 && kernel::selections[4].second == 2 &&
+              kernel::selections[0].second == 0,
+          "each set to its cheat's level");
+    Check(hulk::DisplayCallback(0x124, 3) && hulk::cheats::Level(hulk::cheats::Cheat::Damage) == 3, "one-hit kills chosen");
+    Check(hulk::DisplayCallback(0x120, 1) && hulk::cheats::Level(hulk::cheats::Cheat::Invulnerability) == 1, "invulnerability on");
+    Check(hulk::DisplayCallback(0x120, 0) && hulk::cheats::Level(hulk::cheats::Cheat::Invulnerability) == 0, "and off again");
+    Check(hulk::DisplayCallback(0x124, 7) && hulk::cheats::Level(hulk::cheats::Cheat::Damage) == 3, "a choice past a cheat's is ignored");
+    Check(!hulk::DisplayCallback(0x129, 1), "past the cheats' owners goes to the game");
     Check(!hulk::DisplayCallback(0x00123456, 1), "a real AudioQuality owner goes to the game");
     Check(hulk::DisplayCallback(0x101, 5), "resolution selector");
     Check(app::settings.width == 3840 && app::settings.height == 2160, "3840 x 2160 chosen");
@@ -293,6 +349,8 @@ int main(int argc, char** argv) {
     Check(again.find("AddNamedValueInt \"PCResolution\" 5 \"PCResolutionChanged\"") != std::string::npos &&
               again.find("AddNamedValueInt \"PCDisplayMode\" 2 \"PCDisplayModeChanged\"") != std::string::npos,
           "the script read again starts at the settings as they are");
+    Check(again.find("AddNamedValueInt \"PCCheatDamage\" 3 \"PCCheatDamageChanged\"") != std::string::npos,
+          "the script read again starts at the cheats' levels as they are");
     Check(again.size() == rcf.size(), "the archive keeps its size");
 
 

@@ -12,10 +12,9 @@ namespace hulk::cheats {
 enum class Cheat : uint8_t {
     // combat and stats: game/hooks.cpp, game/cheat_stats.cpp
     Invulnerability,  // god mode: the disc's own invulnerability
-    InfiniteRage,     // the rage (adrenaline) meter stays full, so critical moves never run out
-    InfiniteHealth,   // health refills
+    InfiniteRage,     // Critical Mass, the Hulk's rage: his power stays full, so critical moves never run out
+    InfiniteHealth,   // his power never falls below normal full health
     Damage,           // the player's damage: normal, x2, x4, one-hit kills
-    NoHeat,           // no wanted/heat level from the army
     GameSpeed,        // the world's clock: normal, 75%, 50%, 25%
     // movement and physics: game/cheat_movement.cpp (the issue-12-cheats-movement branch)
     SuperJump,
@@ -65,10 +64,6 @@ void Load(Cheat cheat, int level);
 using Applier = void (*)(const CheatState& state, X86Context& ctx, uint8_t* base);
 bool RegisterApplier(const char* name, Applier applier);
 void RunAppliers(X86Context& ctx, uint8_t* base);  // game/simulation.cpp, after each world update step
-
-// The Cheats screen is open: the native invulnerability selector's callback records the player's choice only then.
-void SetScreenActive(bool active);
-bool ScreenActive();
 
 // The movement branch's entry point (game/cheat_movement.cpp), registered there with RegisterApplier.
 void ApplyMovement(const CheatState& state, X86Context& ctx, uint8_t* base);

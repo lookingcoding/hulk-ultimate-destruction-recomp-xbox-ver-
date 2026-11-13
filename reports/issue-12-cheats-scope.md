@@ -14,13 +14,13 @@ Next, reverse engineer and validate the game's existing cheat callbacks or a gam
 (`issue-12-cheats-movement`). Build against it; do not edit it on the movement branch. If a cheat needs another
 setting, list it in the movement report and it is added here at merge time.
 
-- `enum class hulk::cheats::Cheat`: `Invulnerability, InfiniteRage, InfiniteHealth, Damage, NoHeat, GameSpeed`
+- `enum class hulk::cheats::Cheat`: `Invulnerability, InfiniteRage, InfiniteHealth, Damage, GameSpeed`
   (this branch) and `SuperJump, LowGravity, SuperSpeed` (movement branch).
 - Every cheat is a level, `0` = off. `SuperJump`, `LowGravity` and `SuperSpeed` are off/on toggles (levels 0 and 1);
   the strength used at level 1 is the movement code's choice.
 - `CheatState`: a snapshot of every level; `state[Cheat::SuperJump]`, `state.On(Cheat::LowGravity)`.
 - settings.toml keys (written by `settings_ui.cpp`): `cheat_invulnerability`, `cheat_infinite_rage`,
-  `cheat_infinite_health`, `cheat_damage` (0-3), `cheat_no_heat`, `cheat_game_speed` (0-3), `cheat_super_jump`,
+  `cheat_infinite_health`, `cheat_damage` (0-3), `cheat_game_speed` (0-3), `cheat_super_jump`,
   `cheat_low_gravity`, `cheat_super_speed`. Toggles are bools, levelled cheats integers; missing means off.
 - Appliers: `using Applier = void (*)(const CheatState&, X86Context& ctx, uint8_t* base)`.
   `RegisterApplier(name, fn)` from a static initializer; `game/simulation.cpp` calls `RunAppliers` on the guest's
@@ -52,3 +52,4 @@ seeing the disc's values.
   `IsUnlockableOn` (one strong definition per function) and should not add a second low gravity; it may read
   `state.On(Cheat::LowGravity)` if a movement cheat needs to know.
 - `Cheat::Regeneration` was appended after `SuperSpeed` (settings key `cheat_regeneration`).
+- `NoHeat` was removed: the threat level is not driven by native code this branch could find.

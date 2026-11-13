@@ -17,7 +17,6 @@ constexpr CheatInfo kInfo[kCheatCount] = {
     {Cheat::InfiniteRage, "cheat_infinite_rage", 2},
     {Cheat::InfiniteHealth, "cheat_infinite_health", 2},
     {Cheat::Damage, "cheat_damage", 4},
-    {Cheat::NoHeat, "cheat_no_heat", 2},
     {Cheat::GameSpeed, "cheat_game_speed", 4},
     {Cheat::SuperJump, "cheat_super_jump", 2},
     {Cheat::LowGravity, "cheat_low_gravity", 2},
@@ -31,7 +30,6 @@ static_assert([] {
 }());
 
 std::atomic<uint8_t> g_level[kCheatCount] = {};
-std::atomic<bool> g_screen_active{false};
 
 // Registered from static initializers, before any world update; a fixed table so the update thread never allocates
 struct Registry {
@@ -133,6 +131,4 @@ void RunAppliers(X86Context& ctx, uint8_t* base) {
     for (size_t i = 0, n = r.count.load(); i < n; i++) r.appliers[i].second(state, ctx, base);
 }
 
-void SetScreenActive(bool active) { g_screen_active.store(active); }
-bool ScreenActive() { return g_screen_active.load(); }
 }  // namespace hulk::cheats

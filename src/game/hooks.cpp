@@ -25,7 +25,6 @@
 // display options' selectors (display_menu.cpp)
 X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_CALLBACKS));
 X86_FUNC(HULK_SUB_FE_CALLBACKS) {
-    hulk::cheats::SetScreenActive(false);
     HULK_IMP(HULK_SUB_FE_CALLBACKS)(ctx, base);
     hulk::RegisterDisplayCallbacks(ctx);
 }
