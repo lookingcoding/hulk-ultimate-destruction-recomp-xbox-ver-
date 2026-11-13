@@ -12,6 +12,7 @@
 #include "common/camera.h"
 #include "common/display_menu.h"
 #include "common/language.h"
+#include "common/simulation.h"
 #include "common/view.h"
 #include "core/log.h"
 #include "cpu/x86_ops.h"
@@ -124,6 +125,8 @@ X86_FUNC(HULK_SUB_GUARDED_CALL_B) {
 X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FRAME_SWAP));
 X86_FUNC(HULK_SUB_FRAME_SWAP) {
     constexpr uint32_t kBlanksPassed = 2;
+    // the world update tells passes of the game loop that showed a frame from those that did not (simulation.h)
+    hulk::g_frame_swaps.fetch_add(1, std::memory_order_relaxed);
     X86_MEM32(hulk::addr::kFrameSwapVBlanks) = kBlanksPassed;
     X86_MEM8(hulk::addr::kFrameSwapOneVBlank) = 0;
     HULK_IMP(HULK_SUB_FRAME_SWAP)(ctx, base);
