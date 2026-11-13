@@ -1,0 +1,38 @@
+diff --git a/runtime/gpu/backend.h b/runtime/gpu/backend.h
+--- a/runtime/gpu/backend.h
++++ b/runtime/gpu/backend.h
+@@ -6,6 +6,9 @@
+ #include "gpu/state.h"
+ 
+ namespace gpu {
++
++// Successful, non-occluded DXGI presents, observed across the render and game threads.
++inline std::atomic<uint64_t> g_visible_presents{0};
+ 
+ // D3DCLEAR flags as the XDK defines them
+ enum : uint32_t {
+diff --git a/runtime/gpu/d3d11.cpp b/runtime/gpu/d3d11.cpp
+--- a/runtime/gpu/d3d11.cpp
++++ b/runtime/gpu/d3d11.cpp
+@@ -2760,6 +2760,7 @@
+         logx::Flush();
+         throw std::runtime_error("Direct3D 11 present failed; see the runtime log");
+     }
++    if (presented == S_OK) g_visible_presents.fetch_add(1, std::memory_order_relaxed);
+     g_perf.swap += PerfMs(perf_swap);
+     // the flip model unbinds the back buffer
+     bound_rt_ = bound_ds_ = nullptr;
+diff --git a/runtime/gpu/d3d12.cpp b/runtime/gpu/d3d12.cpp
+--- a/runtime/gpu/d3d12.cpp
++++ b/runtime/gpu/d3d12.cpp
+@@ -3336,7 +3336,9 @@
+     DeliverReports();
+     bool vsync = app::Get().vsync;
+     auto perf_swap = PerfClock::now();
+-    CheckGpu(swap_->Present(vsync ? 1 : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0), "present");
++    const HRESULT presented = swap_->Present(vsync ? 1 : 0, !vsync && tearing_ ? DXGI_PRESENT_ALLOW_TEARING : 0);
++    CheckGpu(presented, "present");
++    if (presented == S_OK) g_visible_presents.fetch_add(1, std::memory_order_relaxed);
+     g_perf.swap += PerfMs(perf_swap);
+ 
+     presents_++;

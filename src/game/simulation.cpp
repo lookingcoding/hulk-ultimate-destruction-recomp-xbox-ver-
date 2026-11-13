@@ -4,6 +4,7 @@
 #include "common/simulation.h"
 #include "common/addresses.h"
 #include "core/log.h"
+#include "gpu/backend.h"
 #include "xdk/hle.h"
 
 // CWorld's ordered update: agents/actors -> smart props -> physics -> actor post-collision ->
@@ -18,10 +19,15 @@
 #endif
 X86_EXTERN_FUNC(WORLD_UPDATE_ORIGINAL);
 namespace {
-// Test-only instrumentation for issue #11's A/B run: how many times the original world update
-// actually ran, logged every five seconds while HULK_TEST_TIMESCALE forces a slow motion.
-unsigned g_updates = 0;
-double g_update_window = 0;
+// Five-second update counters (issue #13): which path ran and how many frames were shown, so a
+// player's log names the path when updates run far faster than 60 Hz. The window is owned by
+// the guest update thread; the presentation counter is atomic.
+struct UpdateStats {
+    unsigned calls = 0, accumulator_calls = 0, steps = 0, dilated = 0;
+    unsigned paused6 = 0, paused7 = 0, nonpositive = 0;
+    double window = 0;
+    uint64_t presents = 0;
+} g_stats;
 }  // namespace
 X86_FUNC(WORLD_UPDATE) {
     static hulk::SimulationClock clock;
@@ -62,19 +68,36 @@ X86_FUNC(WORLD_UPDATE) {
                  static_cast<unsigned long long>(raw), static_cast<unsigned long long>(game), uint32_t(X86_MEM32(state)));
         }
     }
-    if (forced_scale > 0) {
-        g_update_window += real_dt;
-        if (g_update_window >= 5) {
-            LOGI("world update test: %u updates in %.1f s at %.2fx time scale%s", g_updates, g_update_window,
-                 forced_scale, no_fix ? ", the accumulator's way" : "");
-            g_updates = 0, g_update_window = 0;
-        }
+    const uint32_t guest_state = X86_MEM32(state);
+    auto& stats = g_stats;
+    stats.calls++;
+    stats.window += real_dt;
+    // Include the current call in its path count before reporting the window.
+    const auto path = hulk::ClassifyUpdate(guest_state, elapsed, dilated);
+    switch (path) {
+        case hulk::UpdatePath::Paused6: ++stats.paused6; break;
+        case hulk::UpdatePath::Paused7: ++stats.paused7; break;
+        case hulk::UpdatePath::Nonpositive: ++stats.nonpositive; break;
+        case hulk::UpdatePath::Dilated: ++stats.dilated; break;
+        case hulk::UpdatePath::Accumulator: ++stats.accumulator_calls; break;
     }
+    const auto report = [&] {
+        if (stats.window < 5) return;
+        const uint64_t presents = gpu::g_visible_presents.load(std::memory_order_relaxed);
+        LOGI("world update: %.3f s calls=%u accumulator_calls=%u steps=%u dilated=%u state6=%u state7=%u elapsed_nonpositive=%u presents=%llu",
+             stats.window, stats.calls, stats.accumulator_calls, stats.steps, stats.dilated,
+             stats.paused6, stats.paused7, stats.nonpositive, static_cast<unsigned long long>(presents - stats.presents));
+        if (stats.calls > stats.window * 240.0)
+            LOGI("world update high rate: state=%u elapsed=%.9g real_dt=%.9g scale=%llu calls_per_second=%.1f",
+                 guest_state, elapsed, real_dt, static_cast<unsigned long long>(scale), stats.calls / stats.window);
+        stats = {}; stats.presents = presents;
+    };
     // Preserve the original paused/frontend branch and discard fractional time at transitions.
     if (owner != world) { clock.Reset(); owner = world; }
-    if (X86_MEM32(state) == 6 || X86_MEM32(state) == 7 || elapsed <= 0) {
+    if (path == hulk::UpdatePath::Paused6 || path == hulk::UpdatePath::Paused7 ||
+        path == hulk::UpdatePath::Nonpositive) {
         clock.Reset();
-        g_updates++;
+        report();
         WORLD_UPDATE_ORIGINAL(ctx, base);
         return;
     }
@@ -84,13 +107,15 @@ X86_FUNC(WORLD_UPDATE) {
     // frame, skip the update on most frames, and freeze the cinematic's camera and animation
     // to a slideshow while the renderer keeps its full frame rate (issue #11). While time is
     // dilated, run the console's way and keep the accumulator out of it.
-    if (dilated) {
+    if (path == hulk::UpdatePath::Dilated) {
         clock.Reset();
-        g_updates++;
+        report();
         WORLD_UPDATE_ORIGINAL(ctx, base);
         return;
     }
     const unsigned steps = clock.Advance(elapsed);
+    stats.steps += steps;
+    report();
     if (!steps) { ctx.esp += 12; return; }  // thiscall, two arguments, ret 8
     const auto entry = ctx;
     struct RestoreArguments {
@@ -107,7 +132,6 @@ X86_FUNC(WORLD_UPDATE) {
         // reconstruct its call frame, not inherit the previous tick's overwritten arguments.
         X86_MEM32(stack + 4) = state;
         X86_MEM32(stack + 8) = std::bit_cast<uint32_t>(hulk::SimulationClock::kStep);
-        g_updates++;
         WORLD_UPDATE_ORIGINAL(ctx, base);
     }
 }
