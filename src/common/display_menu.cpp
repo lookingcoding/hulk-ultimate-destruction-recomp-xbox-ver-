@@ -318,8 +318,97 @@ void SwapInvertLabels(std::string& script) {
     }
 }
 
-std::optional<Script> EditScript(const std::string& in, const Layout& l) {
-    const std::string nl = in.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+std::optional<Script> EditScript(const std::string& script, const Layout& l) {
+    const std::string nl = script.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+    auto bars = [&](const std::string& n) {
+        if (l.main) return "        $MACRO_INSERT menu_item_" + n + nl;
+        return nl + "        SelectedDrawable \"FE_selectBar\"" + nl + "        NotSelectedDrawable \"FE_backgroundBar\"" + nl + nl +
+               "        TransitionAnimEnter \"slide_down" + n + "\"" + nl + "        TransitionAnimExit  \"slide_down" + n + "\"" + nl;
+    };
+
+    // Options > Cheats (cheats.h): the same kind of selectors as Display Options, calling back the host with the
+    // cheat's level, on two screens
+    auto cheat_screen = [&](int page) {
+        std::string sub;
+        sub += "AddScreen \"" + std::string(kCheatScreens[page]) + "\"" + nl;
+        sub += "{" + nl;
+        sub += "    $MACRO_INSERT typicalScreenSetup" + nl + nl;
+        sub += std::string("    AddLabel \"") + l.title + "\"" + nl;
+        sub += "    {" + nl;
+        sub += std::string("        text \"") + (page ? "TBS_PC_CHEATS_MOVEMENT" : "TBS_MENU_ITEM_SF_CHEATS") + "\" 1" + nl;
+        sub += "        $MACRO_INSERT FormatTitleText" + nl + nl;
+        sub += "        TransitionAnimEnter \"fadein\"" + nl;
+        sub += "        TransitionAnimExit  \"fadeout\"" + nl;
+        sub += "    }" + nl;
+        int n = 0;
+        for (const CheatRow& r : kCheatRows) {
+            if (r.screen != page) continue;
+            const std::string row_n = std::to_string(++n);
+            sub += nl + "    AddTextSelector \"" + l.row + row_n + "\"" + nl;
+            sub += "    {" + nl;
+            sub += std::string("        text \"") + r.label + "\" 1" + nl + nl;
+            sub += "        name \"" + CheatSelector(r) + "\"" + nl;
+            sub += "        TextSelection \"\"";
+            for (const char* c : r.choices) sub += std::string(" ") + c;
+            sub += nl;
+            sub += std::string("        NamedValue \"PCCheat") + r.name + "\"" + nl + nl;
+            sub += "        OnHighlight function \"UpdateControlButtonString\" \"DynamicControlButtonLabel\"  \"2\"" + nl;
+            sub += std::string("        OnHighlight function \"") + kCheatSyncName + "\"" + nl;
+            sub += bars(row_n);
+            sub += "    }" + nl;
+        }
+        auto button = [&](const char* text, const char* target) {
+            const std::string row_n = std::to_string(++n);
+            sub += nl + "    AddTextButton \"" + l.row + row_n + "\"" + nl;
+            sub += "    {" + nl;
+            sub += std::string("        text \"") + text + "\" 1" + nl + nl;
+            sub += std::string("        OnSelect gotoscreen \"") + target + "\"" + nl;
+            sub += "        OnHighlight function \"UpdateControlButtonString\" \"DynamicControlButtonLabel\"  \"1\"" + nl;
+            sub += bars(row_n);
+            sub += "    }" + nl;
+        };
+        if (page == 0) {
+            button("TBS_PC_CHEATS_MOVEMENT", kCheatScreens[1]);
+            if (l.main) button("TBS_MENU_ITEM_SF_CODE_INPUT", "cheats");  // the disc's own Code Input screen
+        }
+        sub += nl + "    $MACRO_INSERT SetupControlButtonLabel" + nl;
+        sub += "}" + nl + nl;
+        return sub;
+    };
+
+    // The frontend keeps at most 64 screens a script (0x000E6840 looks a name up in that table, and a screen past
+    // it is not there to find); the main menu's already has 63 with Display Options. Its first Cheats screen takes
+    // the place of the disc's developer cheat screen, which only its debug builds' Extras opens (unlock-all
+    // buttons), and that link opens the Cheats screen instead.
+    // the cheats' named values, each starting at its level: the text and its digits' offsets in it
+    auto cheat_values = [&](std::vector<size_t>& at) {
+        std::string v = "# Hulk Recompiled cheats: the selectors call back the host" + nl;
+        for (int i = 0; i < kCheatRowCount; i++) {
+            v += std::string("AddNamedValueInt \"PCCheat") + kCheatRows[i].name + "\" ";
+            at.push_back(v.size());
+            v += Digit(kSettings + i);
+            v += std::string(" \"PCCheat") + kCheatRows[i].name + "Changed\"" + nl;
+        }
+        return v + nl;
+    };
+    std::string in = script;
+    std::vector<size_t> cheat_digits;  // the main menu's, where they are in the script: before Options, unmoved
+    if (l.main) {
+        const std::string link = "gotoscreen \"dev_cheats\"", target = std::string("gotoscreen \"") + kCheatScreens[0] + "\"";
+        for (size_t at = in.find(link); at != std::string::npos; at = in.find(link, at + target.size())) in.replace(at, link.size(), target);
+        const std::string update = "        OnSelect function \"UpdateCheatsScreen\"" + nl;  // the developer screen's own
+        for (size_t at = in.find(update); at != std::string::npos; at = in.find(update, at)) in.erase(at, update.size());
+        const std::string dev = "AddScreen \"dev_cheats\"";
+        const size_t from = in.find(dev), to = from == std::string::npos ? from : in.find("AddScreen", from + dev.size());
+        if (to == std::string::npos || to > in.find("AddScreen \"options\"")) {
+            LOGW("display menu: %s has no developer cheat screen before Options to replace, its Options stays as it is", l.file);
+            return std::nullopt;
+        }
+        std::vector<size_t> at;
+        const std::string block = cheat_values(at) + cheat_screen(0);
+        in.replace(from, to - from, block);
+        for (size_t a : at) cheat_digits.push_back(from + a);
+    }
     const std::string options_screen = "AddScreen \"options\"";
     const std::string camera_row = "OnSelect gotoscreen \"camera_options\"" + nl;
     const std::string row_end = "    }" + nl;
@@ -334,11 +423,6 @@ std::optional<Script> EditScript(const std::string& in, const Layout& l) {
         return std::nullopt;
     }
     row += row_end.size();
-    auto bars = [&](const std::string& n) {
-        if (l.main) return "        $MACRO_INSERT menu_item_" + n + nl;
-        return nl + "        SelectedDrawable \"FE_selectBar\"" + nl + "        NotSelectedDrawable \"FE_backgroundBar\"" + nl + nl +
-               "        TransitionAnimEnter \"slide_down" + n + "\"" + nl + "        TransitionAnimExit  \"slide_down" + n + "\"" + nl;
-    };
 
     // the Options screen's rows after Camera Options: Display Options, then Cheats
     auto options_row = [&](const char* slot, const char* text, const char* screen_name, const std::string& n) {
@@ -395,63 +479,19 @@ std::optional<Script> EditScript(const std::string& in, const Layout& l) {
     sub += nl + "    $MACRO_INSERT SetupControlButtonLabel" + nl;
     sub += "}" + nl + nl;
 
-    // Options > Cheats (cheats.h): the same kind of selectors, calling back the host with the cheat's level
-    sub += "# Hulk Recompiled cheats: the selectors call back the host" + nl;
-    for (int i = 0; i < kCheatRowCount; i++) {
-        sub += std::string("AddNamedValueInt \"PCCheat") + kCheatRows[i].name + "\" ";
-        digits.push_back(sub.size());
-        sub += Digit(kSettings + i);
-        sub += std::string(" \"PCCheat") + kCheatRows[i].name + "Changed\"" + nl;
+    if (!l.main) {
+        std::vector<size_t> at;
+        const size_t values_at = sub.size();
+        sub += cheat_values(at);
+        for (size_t a : at) digits.push_back(values_at + a);
+        sub += cheat_screen(0);
     }
-    for (int page = 0; page < int(std::size(kCheatScreens)); page++) {
-        sub += nl + "AddScreen \"" + kCheatScreens[page] + "\"" + nl;
-        sub += "{" + nl;
-        sub += "    $MACRO_INSERT typicalScreenSetup" + nl + nl;
-        sub += std::string("    AddLabel \"") + l.title + "\"" + nl;
-        sub += "    {" + nl;
-        sub += std::string("        text \"") + (page ? "TBS_PC_CHEATS_MOVEMENT" : "TBS_MENU_ITEM_SF_CHEATS") + "\" 1" + nl;
-        sub += "        $MACRO_INSERT FormatTitleText" + nl + nl;
-        sub += "        TransitionAnimEnter \"fadein\"" + nl;
-        sub += "        TransitionAnimExit  \"fadeout\"" + nl;
-        sub += "    }" + nl;
-        int n = 0;
-        for (const CheatRow& r : kCheatRows) {
-            if (r.screen != page) continue;
-            const std::string row_n = std::to_string(++n);
-            sub += nl + "    AddTextSelector \"" + l.row + row_n + "\"" + nl;
-            sub += "    {" + nl;
-            sub += std::string("        text \"") + r.label + "\" 1" + nl + nl;
-            sub += "        name \"" + CheatSelector(r) + "\"" + nl;
-            sub += "        TextSelection \"\"";
-            for (const char* c : r.choices) sub += std::string(" ") + c;
-            sub += nl;
-            sub += std::string("        NamedValue \"PCCheat") + r.name + "\"" + nl + nl;
-            sub += "        OnHighlight function \"UpdateControlButtonString\" \"DynamicControlButtonLabel\"  \"2\"" + nl;
-            sub += std::string("        OnHighlight function \"") + kCheatSyncName + "\"" + nl;
-            sub += bars(row_n);
-            sub += "    }" + nl;
-        }
-        auto button = [&](const char* text, const char* target) {
-            const std::string row_n = std::to_string(++n);
-            sub += nl + "    AddTextButton \"" + l.row + row_n + "\"" + nl;
-            sub += "    {" + nl;
-            sub += std::string("        text \"") + text + "\" 1" + nl + nl;
-            sub += std::string("        OnSelect gotoscreen \"") + target + "\"" + nl;
-            sub += "        OnHighlight function \"UpdateControlButtonString\" \"DynamicControlButtonLabel\"  \"1\"" + nl;
-            sub += bars(row_n);
-            sub += "    }" + nl;
-        };
-        if (page == 0) {
-            button("TBS_PC_CHEATS_MOVEMENT", kCheatScreens[1]);
-            if (l.main) button("TBS_MENU_ITEM_SF_CODE_INPUT", "cheats");  // the disc's own Code Input screen
-        }
-        sub += nl + "    $MACRO_INSERT SetupControlButtonLabel" + nl;
-        sub += "}" + nl + nl;
-    }
+    sub += cheat_screen(1);
 
     Script out{};
     out.text = in.substr(0, row) + item + in.substr(row, screen - row) + sub + in.substr(screen);
     for (size_t d : digits) out.selection.push_back(screen + item.size() + d);
+    out.selection.insert(out.selection.end(), cheat_digits.begin(), cheat_digits.end());
     return out;
 }
 

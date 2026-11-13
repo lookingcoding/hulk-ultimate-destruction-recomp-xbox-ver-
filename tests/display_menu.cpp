@@ -198,7 +198,7 @@ int main(int argc, char** argv) {
     for (const std::string* script : {&main_menu, &pause_menu}) {
         const bool main = script == &main_menu;
         const size_t options = script->find("AddScreen \"options\"");
-        const size_t row = script->find("        text \"TBS_MENU_ITEM_SF_CHEATS\" 1\r\n        OnSelect gotoscreen \"pc_cheats\"");
+        const size_t row = script->find("        text \"TBS_MENU_ITEM_SF_CHEATS\" 1\r\n        OnSelect gotoscreen \"pc_cheats\"", options);
         Check(options < row && row < script->find("AddScreen", options + 1), "its Options screen has a Cheats row");
         Check(script->find(main ? "AddTextButton \"FEmain_left_item6\"\r\n    {\r\n        text \"TBS_MENU_ITEM_SF_CHEATS\""
                                 : "AddTextButton \"FEpause_text5\"\r\n    {\r\n        text \"TBS_MENU_ITEM_SF_CHEATS\"") != std::string::npos,
@@ -208,7 +208,13 @@ int main(int argc, char** argv) {
                   second < script->find("AddScreen \"camera_options\""),
               "both cheat screens are before Camera Options");
         if (first == std::string::npos || second == std::string::npos) continue;
-        const std::string page1 = script->substr(first, second - first);
+        const std::string page1 = script->substr(first, script->find("AddScreen", first + 1) - first);
+        size_t screens = 0;
+        for (size_t at = script->find("\nAddScreen \""); at != std::string::npos; at = script->find("\nAddScreen \"", at + 1))
+            screens++;
+        if (script->find("AddScreen \"init_progressive_check\"") != std::string::npos) screens--;  // GameCube only
+        Check(screens <= 64, "no more screens than the frontend keeps (64)");
+        Check(script->find("AddNamedValueInt \"PCCheatInvulnerability\"") < first, "the cheats' named values come before their screens");
         const std::string page2 = script->substr(second, script->find("AddScreen", second + 1) - second);
         Check(script->find("AddNamedValueInt \"PCCheatDamage\" 2 \"PCCheatDamageChanged\"") != std::string::npos &&
                   script->find("AddNamedValueInt \"PCCheatInfiniteRage\" 1 \"PCCheatInfiniteRageChanged\"") != std::string::npos &&
@@ -239,14 +245,12 @@ int main(int argc, char** argv) {
                   page1.find("AwardCheatersSmashPoints") == std::string::npos && page2.find("Award") == std::string::npos,
               "no unlock or progression controls");
     }
-    // the disc's developer cheat screen (unlock-all buttons) is only reached from its non-release builds' Extras row
-    size_t dev_links = 0;
-    for (size_t at = main_menu.find("gotoscreen \"dev_cheats\""); at != std::string::npos;
-         at = main_menu.find("gotoscreen \"dev_cheats\"", at + 1))
-        dev_links++;
-    Check(dev_links == 1 && main_menu.rfind("ifbuild DEBUG TUNE RELEASE", main_menu.find("gotoscreen \"dev_cheats\"")) >
-                                main_menu.find("AddScreen \"extras\""),
-          "the disc's developer cheat screen keeps only its own debug-build link");
+    // the main menu's first Cheats screen takes the place of the disc's developer cheat screen (unlock-all buttons):
+    // its debug builds' Extras link opens the Cheats screen
+    Check(main_menu.find("dev_cheats") == std::string::npos && main_menu.find("UpdateCheatsScreen") == std::string::npos &&
+              main_menu.find("OnSelect gotoscreen \"pc_cheats\"", main_menu.find("AddScreen \"extras\"")) <
+                  main_menu.find("AddScreen", main_menu.find("AddScreen \"extras\"") + 1),
+          "the developer cheat screen is replaced and its link opens Cheats");
     for (const std::string* script : {&main_menu, &pause_menu}) {
         Check(script->find("AddScreen \"display_options\"") != std::string::npos, "each script has the Display Options screen");
         size_t options = script->find("AddScreen \"options\"");
