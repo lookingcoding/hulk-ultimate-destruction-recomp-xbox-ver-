@@ -1,0 +1,143 @@
+{
+    "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+    "format": 1,
+    "name": "Hulk Recompiled",
+    "repo": "lookingcoding/hulk-ultimate-destruction-recomp-xbox-ver-",
+    "start": {
+        "program": [
+            "Hulk Recompiled.exe"
+        ]
+    },
+    "config": [
+        {
+            "id": "main",
+            "format": "toml",
+            "file": [
+                {
+                    "path": "{install}/game/settings.toml"
+                }
+            ]
+        }
+    ],
+    "folders": {
+        "assets": [
+            {
+                "path": "{install}/assets"
+            }
+        ],
+        "mods": [
+            {
+                "path": "{install}/mods"
+            }
+        ],
+        "logs": [
+            {
+                "path": "{install}/game/logs"
+            }
+        ]
+    },
+    "saves": [
+        "{install}/game/hdd/E",
+        "{install}/game/settings.toml"
+    ],
+    "settings": [
+        {
+            "id": "button_prompts",
+            "label": "Button prompts",
+            "help": "Which buttons the tooltips name. Automatic shows the controller's while one is plugged in, otherwise your keyboard's. Takes effect from the next load.",
+            "choices": [
+                {
+                    "label": "Automatic",
+                    "set": {
+                        "button_prompts": "\"auto\""
+                    }
+                },
+                {
+                    "label": "Keyboard",
+                    "set": {
+                        "button_prompts": "\"keyboard\""
+                    }
+                },
+                {
+                    "label": "Controller",
+                    "set": {
+                        "button_prompts": "\"controller\""
+                    }
+                },
+                {
+                    "label": "PlayStation",
+                    "set": {
+                        "button_prompts": "\"playstation\""
+                    }
+                }
+            ],
+            "defaults": {
+                "button_prompts": "\"auto\""
+            }
+        },
+        {
+            "id": "aspect",
+            "label": "Aspect ratio",
+            "help": "The game draws in 4:3. Choose 4:3 to see it with bars on the sides on a widescreen instead of stretched.",
+            "choices": [
+                {
+                    "label": "Automatic",
+                    "set": {
+                        "aspect": "\"auto\""
+                    }
+                },
+                {
+                    "label": "4:3",
+                    "set": {
+                        "aspect": "\"4:3\""
+                    }
+                },
+                {
+                    "label": "16:9",
+                    "set": {
+                        "aspect": "\"16:9\""
+                    }
+                }
+            ],
+            "defaults": {
+                "aspect": "\"auto\""
+            }
+        },
+        {
+            "id": "renderer",
+            "label": "Graphics",
+            "help": "Automatic tries Direct3D 12 first and falls back to Direct3D 11 on older graphics cards. Choose Direct3D 11 to always use it.",
+            "choices": [
+                {
+                    "label": "Automatic",
+                    "set": {
+                        "renderer": "\"auto\""
+                    }
+                },
+                {
+                    "label": "Direct3D 11",
+                    "set": {
+                        "renderer": "\"d3d11\""
+                    }
+                }
+            ],
+            "defaults": {
+                "renderer": "\"auto\""
+            }
+        }
+    ],
+    "actions": [
+        {
+            "id": "assets",
+            "label": "Game disc folder",
+            "help": "Put your Xbox disc image (.iso) of The Incredible Hulk: Ultimate Destruction here.",
+            "open": "assets"
+        },
+        {
+            "id": "mods",
+            "label": "Mods",
+            "help": "Each mod goes in its own folder here. The game creates this folder on first launch.",
+            "open": "mods"
+        }
+    ]
+}

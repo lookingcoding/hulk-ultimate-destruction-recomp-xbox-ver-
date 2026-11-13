@@ -34,6 +34,7 @@ foreach ($file in Get-ChildItem "$build\compiler" -File -Recurse) {
 }
 Copy-Verified "$project\README.md" 'README.md'
 Copy-Verified "$project\STATUS.md" 'STATUS.md'
+Copy-Verified "$project\recomplauncher.json" 'recomplauncher.json'  # RecompLauncher reads it from the top of the zip
 Copy-Verified "$project\LICENSE" 'LICENSE.txt'
 Copy-Verified "$project\sdk\LICENSE" 'SDK-LICENSE.txt'
 Copy-Verified "$project\sdk\THIRD_PARTY.txt" 'THIRD_PARTY.txt'
