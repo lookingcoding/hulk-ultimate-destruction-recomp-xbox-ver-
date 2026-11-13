@@ -36,3 +36,19 @@ setting, list it in the movement report and it is added here at merge time.
   HulkRecompiledUSA. The movement branch also adds the two-line `src/game_usa/cheat_movement.cpp`
   (`#include "game/cheat_movement.cpp"`), as `src/game_usa/hooks.cpp` does for hooks.
 - Menu labels, the Options -> Cheats screen and its four languages belong to this branch (`display_menu.cpp`).
+
+### Interface update: the disc's own cheats and low gravity
+
+The disc already implements several cheats as unlockables that gameplay code checks with `IsUnlockableOn`
+(thiscall manager, id; EU `0x929E0`, USA `0x92940`). The unlockable names are in a table at EU `0x49EFF0`
+(`0x2FE` entries). `game/cheat_stats.cpp` hooks `IsUnlockableOn` and answers "on" only at the gameplay call sites
+(matched by the guest return address) while the player has the host cheat on. The profile's own bits are never
+written; the save serializer (EU `0x8B81D`) and the frontend read the same function from other call sites and keep
+seeing the disc's values.
+
+- `LowGravity` is the disc's `CHEATS_LOW_GRAVITY` (`0x13`), checked per update at a character's gravity multiplier
+  (EU return `0x826AA`, USA `0x826CA`) and the physics world's gravity (-500 instead of -3000; EU `0x1B6024`,
+  `0x1B6093`; USA `0x1B5DE4`, `0x1B5E53`). It is answered by this branch. The movement branch must not hook
+  `IsUnlockableOn` (one strong definition per function) and should not add a second low gravity; it may read
+  `state.On(Cheat::LowGravity)` if a movement cheat needs to know.
+- `Cheat::Regeneration` was appended after `SuperSpeed` (settings key `cheat_regeneration`).

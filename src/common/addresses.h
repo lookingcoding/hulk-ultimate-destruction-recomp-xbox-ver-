@@ -27,8 +27,15 @@ inline constexpr uint32_t kFiberTlsIndex = 0x004E5A9C;
 inline constexpr uint32_t kSwitchToFiber = 0x0035551D, kDeleteFiber = 0x0035550A, kFiberBootstrap = 0x00355439;
 inline constexpr uint32_t kHintBegin = 0x000CE700;            // hud_triggerButtonHintBegin
 #define HULK_SUB_FE_CALLBACKS sub_000C43A0  // the frontend's callbacks object
-inline constexpr uint32_t kCheatInvulHandler = 0x000BBDF0;
-inline constexpr uint32_t kSetUnlockableOn = 0x00092870;
+// cheats (game/cheat_stats.cpp): IsUnlockableOn's gameplay call sites by return address, the damage a character takes,
+// its health setter (thiscall value, force) and the world clock's scale setter (thiscall float)
+#define HULK_SUB_IS_UNLOCKABLE_ON sub_00092940
+#define HULK_SUB_APPLY_DAMAGE sub_00043350
+inline constexpr uint32_t kRetInvulnerability = 0x000434FF, kRetDoubleDamage = 0x000434B1;
+inline constexpr uint32_t kRetDoubleDamageProps = 0x001D709B, kRetRegenerator = 0x00040BC1;
+inline constexpr uint32_t kRetLowGravityCharacter = 0x000826CA, kRetLowGravityWorld = 0x001B5DE4;
+inline constexpr uint32_t kRetLowGravityWorldOff = 0x001B5E53;
+inline constexpr uint32_t kSetHealth = 0x0003B1C0, kTimerSetScale = 0x00086100;
 #define HULK_SUB_AUDIO_QUALITY sub_000BBD10
 #define HULK_SUB_PRINT sub_000B45E0
 #define HULK_SUB_MENU_PROMPT sub_000BC900   // the frontend's bottom prompt
@@ -71,8 +78,13 @@ inline constexpr uint32_t kFiberTlsIndex = 0x004E7BDC;
 inline constexpr uint32_t kSwitchToFiber = 0x00350EBD, kDeleteFiber = 0x00350EAA, kFiberBootstrap = 0x00350DD9;
 inline constexpr uint32_t kHintBegin = 0x000CE870;            // hud_triggerButtonHintBegin
 #define HULK_SUB_FE_CALLBACKS sub_000C4500
-inline constexpr uint32_t kCheatInvulHandler = 0x000BBFA0;
-inline constexpr uint32_t kSetUnlockableOn = 0x00092910;
+#define HULK_SUB_IS_UNLOCKABLE_ON sub_000929E0
+#define HULK_SUB_APPLY_DAMAGE sub_00043330
+inline constexpr uint32_t kRetInvulnerability = 0x000434DF, kRetDoubleDamage = 0x00043491;
+inline constexpr uint32_t kRetDoubleDamageProps = 0x001D7ABB, kRetRegenerator = 0x00040BA1;
+inline constexpr uint32_t kRetLowGravityCharacter = 0x000826AA, kRetLowGravityWorld = 0x001B6024;
+inline constexpr uint32_t kRetLowGravityWorldOff = 0x001B6093;
+inline constexpr uint32_t kSetHealth = 0x0003B190, kTimerSetScale = 0x000860E0;
 #define HULK_SUB_AUDIO_QUALITY sub_000BBEC0
 #define HULK_SUB_PRINT sub_000B46B0
 #define HULK_SUB_MENU_PROMPT sub_000BCA60

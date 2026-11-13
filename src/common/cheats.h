@@ -19,8 +19,10 @@ enum class Cheat : uint8_t {
     GameSpeed,        // the world's clock: normal, 75%, 50%, 25%
     // movement and physics: game/cheat_movement.cpp (the issue-12-cheats-movement branch)
     SuperJump,
-    LowGravity,
+    LowGravity,  // the disc's own low gravity (unlockable 0x13), answered by game/cheat_stats.cpp's IsUnlockableOn hook
     SuperSpeed,
+    // more combat and stats (appended so earlier values keep their numbers)
+    Regeneration,  // the disc's regenerator: faster health regeneration
     Count
 };
 inline constexpr size_t kCheatCount = size_t(Cheat::Count);
