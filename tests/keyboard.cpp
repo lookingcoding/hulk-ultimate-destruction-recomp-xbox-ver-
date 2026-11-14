@@ -17,23 +17,23 @@ static bool Check(bool value, const char* message) {
     return value;
 }
 
-static bool TestEnterMenus() {
+static bool TestEnterMenus(const char* slot_name) {
     // Exercise the real highlighted-widget lookup with either disc's frontend addresses.
     std::vector<uint8_t> guest(hulk::addr::kFrontend + sizeof(uint32_t));
     guest_base = guest.data();
     const auto write = [&](uint32_t address, auto value) {
         std::memcpy(guest.data() + address, &value, sizeof(value));
     };
-    constexpr uint32_t manager = 0x10000, screen = 0x20000, selector = 0x21000, text = selector + 0x48;
+    // Real widgets store their separately allocated label pointer at +0x14.
+    constexpr uint32_t manager = 0x10000, screen = 0x20000, selector = 0x21000, text = 0x31000;
     uint64_t hash = 0;
-    for (const char c : "FEsubMenu_text1") {
-        if (c) hash = (hash * 0x1003Full) ^ uint64_t(c);
-    }
+    for (const char* p = slot_name; *p; ++p) hash = (hash * 0x1003Full) ^ uint64_t(*p);
     write(hulk::addr::kFrontend, manager);
     write(manager + 0x175C, screen);
     write(screen + 0x48, text);
     write(screen + 0x44C, selector);
     write(selector, hulk::addr::kTextSelectorVtable);
+    write(selector + 0x14, text);
     write(text + 0x20, hash);
     const auto reset = [] {
         hulk::KeyboardMessage(nullptr, WM_KILLFOCUS, 0, 0, nullptr);
@@ -84,6 +84,9 @@ static bool TestEnterMenus() {
     if (!Check(pad.buttons == 0x0C && pad.analog[0] == 123, "Enter failed alongside a physical controller")) return false;
 
     reset();
+    // A closer adjacent widget must not be mistaken for the highlighted row's owner.
+    write(screen + 0x450, text - 0x100);
+    write(text - 0x100, hulk::addr::kTextSelectorVtable);
     write(selector, uint32_t(0));  // ordinary action row
     key(WM_KEYDOWN);
     pad = poll();
@@ -224,6 +227,6 @@ int main() {
     if (!Check(hulk::IsCursorHiddenForTest(), "Cursor was not hidden in gameplay mode with gamepad")) return 1;
     hulk::SetGamepadDetected(false);
 
-    if (!TestEnterMenus()) return 1;
+    if (!TestEnterMenus("FEsubMenu_text1") || !TestEnterMenus("FEpause_text1")) return 1;
     std::puts("Gameplay mouse-look, cursor hiding, menu controls, and Enter option selection passed.");
 }

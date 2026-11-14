@@ -249,15 +249,19 @@ std::optional<Slot> HighlightedSlot(bool* selector = nullptr) {
     for (const auto& [h, slot] : SlotNames()) {
         if (h != hash) continue;
         if (selector) {
-            // the child holding the text, a TextSelector by its vtable
-            uint32_t owner = 0;
+            // The label is separately allocated; both frontend layouts keep its pointer
+            // at +0x14. Follow that ownership link rather than guessing by proximity.
+            constexpr uint32_t kLabelPointer = 0x14;
+            *selector = false;
             for (uint32_t i = 0; i < 0x80; ++i) {
-                uint32_t child = 0;
+                uint32_t child = 0, label = 0, vtable = 0;
                 if (!ReadGuestU32(base, screen + 0x44Cu + i * 4, child) || !child) break;
-                if (child <= text && text - child < 0x400 && child > owner) owner = child;
+                if (ReadGuestU32(base, child + kLabelPointer, label) && label == text &&
+                    ReadGuestU32(base, child, vtable) && vtable == hulk::addr::kTextSelectorVtable) {
+                    *selector = true;
+                    break;
+                }
             }
-            uint32_t vtable = 0;
-            *selector = owner && ReadGuestU32(base, owner, vtable) && vtable == hulk::addr::kTextSelectorVtable;
         }
         return slot;
     }
