@@ -19,6 +19,12 @@
 #include "core/input.h"
 #include "kernel/memory.h"
 
+#ifdef HULK_KEYBOARD_HEADLESS_TEST
+// Input tests must not release the cursor lock of a running game.
+static BOOL HeadlessClipCursor(const RECT*) { return TRUE; }
+#define ClipCursor HeadlessClipCursor
+#endif
+
 namespace hulk {
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -112,6 +118,7 @@ struct StepQueue {
 };
 
 std::array<std::atomic<bool>, 256> keys{};
+std::atomic<bool> enter_on_selector{false};
 std::atomic<HWND> game_hwnd{nullptr};
 std::atomic<bool> window_focused{true};
 std::atomic<int> test_mode_override{0};
@@ -155,6 +162,7 @@ MenuTarget menu_target{};
 ButtonLatch mouse_left{};
 ButtonLatch mouse_right{};
 StepQueue dpad_steps{};
+StepQueue enter_steps{};
 int wheel_v_accum = 0;
 int wheel_h_accum = 0;
 bool has_cursor_pos = false;
@@ -434,10 +442,12 @@ int16_t StickFromLookDelta(float delta) {
 
 void Clear() {
     for (auto& key : keys) key.store(false, std::memory_order_relaxed);
+    enter_on_selector.store(false, std::memory_order_relaxed);
     std::lock_guard lock(mouse_mutex);
     mouse_left.Reset();
     mouse_right.Reset();
     dpad_steps.Reset();
+    enter_steps.Reset();
     menu_target = MenuTarget{};
     wheel_v_accum = 0;
     wheel_h_accum = 0;
@@ -535,6 +545,16 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
 
     if (message == WM_KEYDOWN || message == WM_KEYUP) {
         if (wp < keys.size()) {
+            if (wp == VK_RETURN && message == WM_KEYDOWN && !Down(VK_RETURN)) {
+                bool selector = false;
+                if (in_menu) HighlightedSlot(&selector);
+                enter_on_selector.store(selector, std::memory_order_relaxed);
+                if (selector) {
+                    std::lock_guard lock(mouse_mutex);
+                    menu_target.active = false;
+                    enter_steps.Push(0x08u);  // next choice, once per Enter press
+                }
+            }
             keys[wp].store(message == WM_KEYDOWN, std::memory_order_relaxed);
         }
         return false;
@@ -710,7 +730,7 @@ void KeyboardPad(int port, input::Pad& pad) {
         }
     }
 
-    // Single keybind per action:
+    // Keyboard controls:
     // D-pad: Arrow keys (Up / Down / Left / Right)
     // Start (Menu / Pause): Esc
     // Back (Map / Objectives): Tab
@@ -734,7 +754,8 @@ void KeyboardPad(int port, input::Pad& pad) {
     // [5] White (Cycle Target): 1
     // [6] Left Trigger (Target Lock-On / Guard): Right Click (in gameplay)
     // [7] Right Trigger (Sprint / Wall Run / Dodge): Left Shift
-    if (Down(VK_SPACE) || Down(VK_RETURN)) pad.analog[0] = 255;
+    if (Down(VK_SPACE) || (Down(VK_RETURN) && (!in_menu || !enter_on_selector.load(std::memory_order_relaxed))))
+        pad.analog[0] = 255;
     if (Down('Q')) pad.analog[1] = 255;
     if (Down('E')) pad.analog[3] = 255;
     if (Down('2')) pad.analog[4] = 255;
@@ -755,6 +776,9 @@ void KeyboardPad(int port, input::Pad& pad) {
         const bool right_pressed = mouse_right.Sample(now);
 
         if (in_menu) {
+            // Enter advances a highlighted selector; ordinary rows/dialogs still receive A.
+            // Keep keyboard input available even when a physical controller is connected.
+            pad.buttons |= enter_steps.Sample(now);
             // In menus:
             // Left Click = Button A (Select)
             // Right Click = Button B (Back)
@@ -771,6 +795,7 @@ void KeyboardPad(int port, input::Pad& pad) {
             look_dy = 0.0f;
             has_raw_delta = false;
         } else {
+            enter_steps.Reset();
             // In gameplay:
             // Left Click = Button X (Punch)
             // Right Click = Left Trigger (Lock-On / Guard)

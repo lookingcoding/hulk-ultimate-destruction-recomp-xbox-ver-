@@ -72,7 +72,7 @@ Keyboard and mouse input is mapped to player 1 alongside any connected Xbox/Play
 | **Mouse Wheel** (in play) | Camera Closer / Farther | — |
 | **W / A / S / D** | Movement | Left Analog Stick |
 | **Space** | Jump / Charge Jump / Select | A Button |
-| **Enter** | Select (menus) | A Button |
+| **Enter** | Select (menus) / Next value (option rows, including Cheats) | A Button / D-Pad Right |
 | **Q** | Grab / Pick Up / Throw / Back | B Button |
 | **Delete** | Delete (save screens) | X Button |
 | **E** | Special / Critical Mass / Ground Slam | Y Button |

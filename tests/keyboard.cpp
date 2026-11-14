@@ -1,16 +1,118 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <cstdio>
+#include <cstring>
+#include <vector>
+#include "common/addresses.h"
 #include "common/keyboard.h"
 #include "core/input.h"
 #include "kernel/memory.h"
 
 namespace hulk { void ReplayPad(int, input::Pad&) {} }
-namespace mem { uint8_t* Base() { return nullptr; } }
+static uint8_t* guest_base = nullptr;
+namespace mem { uint8_t* Base() { return guest_base; } }
 
 static bool Check(bool value, const char* message) {
     if (!value) std::fprintf(stderr, "%s\n", message);
     return value;
+}
+
+static bool TestEnterMenus() {
+    // Exercise the real highlighted-widget lookup with either disc's frontend addresses.
+    std::vector<uint8_t> guest(hulk::addr::kFrontend + sizeof(uint32_t));
+    guest_base = guest.data();
+    const auto write = [&](uint32_t address, auto value) {
+        std::memcpy(guest.data() + address, &value, sizeof(value));
+    };
+    constexpr uint32_t manager = 0x10000, screen = 0x20000, selector = 0x21000, text = selector + 0x48;
+    uint64_t hash = 0;
+    for (const char c : "FEsubMenu_text1") {
+        if (c) hash = (hash * 0x1003Full) ^ uint64_t(c);
+    }
+    write(hulk::addr::kFrontend, manager);
+    write(manager + 0x175C, screen);
+    write(screen + 0x48, text);
+    write(screen + 0x44C, selector);
+    write(selector, hulk::addr::kTextSelectorVtable);
+    write(text + 0x20, hash);
+    const auto reset = [] {
+        hulk::KeyboardMessage(nullptr, WM_KILLFOCUS, 0, 0, nullptr);
+        hulk::KeyboardMessage(nullptr, WM_SETFOCUS, 0, 0, nullptr);
+        hulk::SetMenuModeForTest(1);
+        hulk::SetGamepadDetected(false);
+    };
+    const auto key = [](uint32_t message, intptr_t flags = 0) {
+        hulk::KeyboardMessage(nullptr, message, VK_RETURN, flags, nullptr);
+    };
+    const auto poll = [] {
+        input::Pad pad{};
+        hulk::KeyboardPad(0, pad);
+        return pad;
+    };
+
+    reset();
+    key(WM_KEYDOWN);
+    auto pad = poll();
+    if (!Check(pad.buttons == 0x08 && pad.analog[0] == 0, "Enter did not advance a selector without also selecting")) return false;
+    Sleep(35);  // finish the pulse, then observe its release gap
+    poll();
+    key(WM_KEYDOWN, intptr_t(1) << 30);  // Windows held-key repeat
+    pad = poll();
+    if (!Check(pad.buttons == 0 && pad.analog[0] == 0, "Held Enter repeated the selector change")) return false;
+    Sleep(25);
+    if (!Check(poll().buttons == 0, "Held Enter queued another selector change")) return false;
+    key(WM_KEYUP);
+    key(WM_KEYDOWN);
+    if (!Check(poll().buttons == 0x08, "A second Enter press did not advance the selector")) return false;
+
+    reset();
+    key(WM_KEYDOWN);
+    key(WM_KEYUP);  // a tap shorter than one input poll must still register
+    pad = poll();
+    if (!Check(pad.buttons == 0x08 && pad.analog[0] == 0, "A quick Enter tap was lost")) return false;
+
+    reset();
+    key(WM_KEYDOWN);
+    reset();
+    if (!Check(poll().buttons == 0, "Focus loss left a queued Enter change")) return false;
+
+    reset();
+    hulk::SetGamepadDetected(true);
+    key(WM_KEYDOWN);
+    pad = {}; pad.connected = true; pad.buttons = 0x04; pad.analog[0] = 123;
+    hulk::KeyboardPad(0, pad);
+    if (!Check(pad.buttons == 0x0C && pad.analog[0] == 123, "Enter failed alongside a physical controller")) return false;
+
+    reset();
+    write(selector, uint32_t(0));  // ordinary action row
+    key(WM_KEYDOWN);
+    pad = poll();
+    if (!Check(pad.analog[0] == 255 && pad.buttons == 0, "Enter no longer selects ordinary menu rows")) return false;
+
+    reset();
+    write(selector, hulk::addr::kTextSelectorVtable);
+    write(manager + 0x1760, uint32_t(0x30000));  // confirmation dialog overlays the selector
+    key(WM_KEYDOWN);
+    pad = poll();
+    if (!Check(pad.analog[0] == 255 && pad.buttons == 0, "Enter did not confirm a dialog")) return false;
+
+    reset();
+    hulk::KeyboardMessage(nullptr, WM_KEYDOWN, VK_RIGHT, 0, nullptr);
+    if (!Check(poll().buttons == 0x08, "Right-arrow option navigation changed")) return false;
+    reset();
+    hulk::KeyboardMessage(nullptr, WM_KEYDOWN, VK_SPACE, 0, nullptr);
+    pad = poll();
+    if (!Check(pad.analog[0] == 255 && pad.buttons == 0, "Space's Select binding changed")) return false;
+
+    reset();
+    hulk::SetMenuModeForTest(-1);
+    key(WM_KEYDOWN);
+    pad = poll();
+    if (!Check(pad.analog[0] == 255 && pad.buttons == 0, "Enter's gameplay jump binding changed")) return false;
+
+    guest_base = nullptr;
+    reset();
+    return true;
 }
 
 int main() {
@@ -122,5 +224,6 @@ int main() {
     if (!Check(hulk::IsCursorHiddenForTest(), "Cursor was not hidden in gameplay mode with gamepad")) return 1;
     hulk::SetGamepadDetected(false);
 
-    std::puts("Gameplay mouse-look, cursor hiding, and menu controls passed.");
+    if (!TestEnterMenus()) return 1;
+    std::puts("Gameplay mouse-look, cursor hiding, menu controls, and Enter option selection passed.");
 }
