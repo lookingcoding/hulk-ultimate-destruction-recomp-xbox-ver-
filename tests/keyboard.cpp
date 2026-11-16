@@ -5,10 +5,18 @@
 #include <vector>
 #include "common/addresses.h"
 #include "common/keyboard.h"
+#include "common/bindings.h"
 #include "core/input.h"
 #include "kernel/memory.h"
 
-namespace hulk { void ReplayPad(int, input::Pad&) {} }
+namespace hulk {
+void ReplayPad(int, input::Pad&) {}
+bool controls_open = false;
+bool ControlsOpen() { return controls_open; }
+int zoom_steps = 0;
+bool StepCameraDistance(int steps) { zoom_steps += steps; return true; }
+void NoteSettingChanged() {}
+}
 static uint8_t* guest_base = nullptr;
 namespace mem { uint8_t* Base() { return guest_base; } }
 
@@ -114,6 +122,46 @@ static bool TestEnterMenus(const char* slot_name) {
     if (!Check(pad.analog[0] == 255 && pad.buttons == 0, "Enter's gameplay jump binding changed")) return false;
 
     guest_base = nullptr;
+    reset();
+    return true;
+}
+
+static bool TestRebinding() {
+    using namespace hulk;
+    using bindings::Action;
+    const auto reset = [] {
+        KeyboardMessage(nullptr, WM_KILLFOCUS, 0, 0, nullptr);
+        KeyboardMessage(nullptr, WM_SETFOCUS, 0, 0, nullptr);
+        SetMenuModeForTest(-1);
+    };
+    const auto poll = [] { input::Pad pad{}; KeyboardPad(0, pad); return pad; };
+    auto map = bindings::Defaults();
+    map.inputs[size_t(Action::MoveUp)] = {'I'};
+    map.inputs[size_t(Action::Attack)] = {VK_XBUTTON1};
+    map.inputs[size_t(Action::Jump)] = {bindings::WheelUp};
+    map.inputs[size_t(Action::ZoomIn)] = {'Z'};
+    bindings::Set(map);
+    reset();
+    KeyboardMessage(nullptr, WM_KEYDOWN, 'W', 0, nullptr);
+    if (!Check(poll().ly == 0, "The original W binding survived a rebind")) return false;
+    KeyboardMessage(nullptr, WM_KEYDOWN, 'I', 0, nullptr);
+    if (!Check(poll().ly == 32767, "Rebound movement did not reach the controller")) return false;
+    KeyboardMessage(nullptr, WM_LBUTTONDOWN, 0, 0, nullptr);
+    if (!Check(poll().analog[2] == 0, "The original mouse attack survived a rebind")) return false;
+    KeyboardMessage(nullptr, WM_XBUTTONDOWN, MAKEWPARAM(0, XBUTTON1), 0, nullptr);
+    KeyboardMessage(nullptr, WM_XBUTTONUP, MAKEWPARAM(0, XBUTTON1), 0, nullptr);
+    if (!Check(poll().analog[2] == 255, "A short side-button tap was lost")) return false;
+    KeyboardMessage(nullptr, WM_MOUSEWHEEL, MAKEWPARAM(0, WHEEL_DELTA), 0, nullptr);
+    if (!Check(poll().analog[0] == 255, "A wheel binding did not reach the controller")) return false;
+    zoom_steps = 0;
+    KeyboardMessage(nullptr, WM_KEYDOWN, 'Z', 0, nullptr);
+    if (!Check(zoom_steps == -1, "Keyboard rebinding of camera zoom failed")) return false;
+    controls_open = true;
+    if (!Check(poll().ly == 0 && !IsCursorHiddenForTest(), "Controls failed to clear input and release cursor")) return false;
+    KeyboardMessage(nullptr, WM_KEYDOWN, 'I', 0, nullptr);
+    controls_open = false;
+    if (!Check(poll().ly == 0, "Held input leaked out of Controls")) return false;
+    bindings::Reset();
     reset();
     return true;
 }
@@ -228,5 +276,6 @@ int main() {
     hulk::SetGamepadDetected(false);
 
     if (!TestEnterMenus("FEsubMenu_text1") || !TestEnterMenus("FEpause_text1")) return 1;
+    if (!TestRebinding()) return 1;
     std::puts("Gameplay mouse-look, cursor hiding, menu controls, and Enter option selection passed.");
 }
