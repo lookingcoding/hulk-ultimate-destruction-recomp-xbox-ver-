@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "common/mouse_look.h"
 namespace input { struct Pad; }
 namespace hulk {
 void SetGameWindow(void* hwnd);
@@ -12,7 +13,12 @@ void SetGamepadDetected(bool detected);
 bool IsGamepadDetected();
 
 // Mouse and camera controls configuration
+// Legacy scalar writes both axes; scalar reads X. UI should use the axis APIs.
 void SetMouseSensitivity(float s);
+void SetMouseSensitivityX(float s);
+float GetMouseSensitivityX();
+void SetMouseSensitivityY(float s);
+float GetMouseSensitivityY();
 float GetMouseSensitivity();
 void SetMouseInvertY(bool invert);
 bool GetMouseInvertY();

@@ -39,8 +39,6 @@ constexpr int kMinPollsPerPhase = 1;
 constexpr int kMenuMoveStepPixels = 40;
 constexpr size_t kMaxQueuedSteps = 4;
 constexpr UINT kSyncCursorMsg = WM_APP + 42;
-constexpr float kCameraDeadzone = 7500.0f;
-constexpr float kCameraSensitivity = 950.0f;
 
 struct ButtonLatch {
     bool held = false;
@@ -141,7 +139,8 @@ std::atomic<int> last_polled_menu_state{-1};
 std::atomic<bool> raw_input_registered{false};
 
 // Configurable PC controls (persisted in settings.toml)
-std::atomic<float> mouse_sensitivity{1.0f};
+std::atomic<float> mouse_sensitivity_x{kMouseSensitivityDefault};
+std::atomic<float> mouse_sensitivity_y{kMouseSensitivityDefault};
 std::atomic<bool> mouse_invert_y{false};
 std::atomic<bool> mouse_smoothing{false};
 
@@ -178,10 +177,7 @@ int last_cursor_x = 0;
 int last_cursor_y = 0;
 int move_accum_x = 0;
 int move_accum_y = 0;
-float look_dx = 0.0f;
-float look_dy = 0.0f;
-bool has_raw_delta = false;
-Clock::time_point last_look_time{};
+MouseLook mouse_look{};
 
 bool Down(unsigned key) { return keys[key].load(std::memory_order_relaxed); }
 
@@ -389,6 +385,7 @@ void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
             menu_target = MenuTarget{};
             move_accum_x = 0;
             move_accum_y = 0;
+            mouse_look.Reset();
             POINT center{};
             if (CenterCursorInWindow(hwnd, center)) {
                 has_cursor_pos = true;
@@ -412,8 +409,7 @@ void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
             menu_target = MenuTarget{};
             move_accum_x = 0;
             move_accum_y = 0;
-            look_dx = 0.0f;
-            look_dy = 0.0f;
+            mouse_look.Reset();
             has_cursor_pos = false;
             break;
         }
@@ -426,30 +422,13 @@ void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
                 ClipCursor(nullptr);
             }
             std::lock_guard lock(mouse_mutex);
-            look_dx = 0.0f;
-            look_dy = 0.0f;
+            mouse_look.Reset();
             has_cursor_pos = false;
             break;
         }
         default:
             break;
     }
-}
-
-int16_t StickFromLookDelta(float delta) {
-    if (std::abs(delta) < 0.1f) return 0;
-    const float sign = delta < 0.0f ? -1.0f : 1.0f;
-    const float sens = mouse_sensitivity.load(std::memory_order_relaxed);
-    const float abs_d = std::abs(delta) * sens;
-
-    // Smooth deadzone blending:
-    // Hulk's camera engine requires stick values above ~7500 to rotate.
-    // Blend deadzone smoothly over the initial motion, then scale linearly.
-    const float blend = std::min(1.0f, abs_d / 2.5f);
-    const float deadzone = kCameraDeadzone * blend;
-    const float dynamic_rate = abs_d * kCameraSensitivity;
-    const float mag = deadzone + dynamic_rate;
-    return static_cast<int16_t>(std::clamp(sign * mag, -32767.0f, 32767.0f));
 }
 
 void Clear() {
@@ -468,14 +447,16 @@ void Clear() {
     has_cursor_pos = false;
     move_accum_x = 0;
     move_accum_y = 0;
-    look_dx = 0.0f;
-    look_dy = 0.0f;
-    has_raw_delta = false;
+    mouse_look.Reset();
 }
 }  // namespace
 
-void SetMouseSensitivity(float s) { mouse_sensitivity.store(std::clamp(s, 0.1f, 5.0f), std::memory_order_relaxed); }
-float GetMouseSensitivity() { return mouse_sensitivity.load(std::memory_order_relaxed); }
+void SetMouseSensitivity(float s) { SetMouseSensitivityX(s); SetMouseSensitivityY(s); }
+float GetMouseSensitivity() { return GetMouseSensitivityX(); }
+void SetMouseSensitivityX(float s) { mouse_sensitivity_x.store(SanitizeMouseSensitivity(s), std::memory_order_relaxed); }
+float GetMouseSensitivityX() { return mouse_sensitivity_x.load(std::memory_order_relaxed); }
+void SetMouseSensitivityY(float s) { mouse_sensitivity_y.store(SanitizeMouseSensitivity(s), std::memory_order_relaxed); }
+float GetMouseSensitivityY() { return mouse_sensitivity_y.load(std::memory_order_relaxed); }
 void SetMouseInvertY(bool invert) { mouse_invert_y.store(invert, std::memory_order_relaxed); }
 bool GetMouseInvertY() { return mouse_invert_y.load(std::memory_order_relaxed); }
 void SetMouseSmoothing(bool smoothing) { mouse_smoothing.store(smoothing, std::memory_order_relaxed); }
@@ -484,13 +465,16 @@ bool GetMouseSmoothing() { return mouse_smoothing.load(std::memory_order_relaxed
 void SetGameWindow(void* hwnd) {
     HWND w = static_cast<HWND>(hwnd);
     game_hwnd.store(w, std::memory_order_relaxed);
-    if (w && IsWindow(w) && !raw_input_registered.exchange(true, std::memory_order_relaxed)) {
+    if (w && IsWindow(w) && !raw_input_registered.load(std::memory_order_relaxed)) {
         RAWINPUTDEVICE rid{};
         rid.usUsagePage = 0x01;  // Generic Desktop Controls
         rid.usUsage = 0x02;      // Mouse
         rid.dwFlags = 0;
         rid.hwndTarget = w;
-        RegisterRawInputDevices(&rid, 1, sizeof(rid));
+        const bool registered = RegisterRawInputDevices(&rid, 1, sizeof(rid)) != FALSE;
+        raw_input_registered.store(registered, std::memory_order_relaxed);
+        std::lock_guard lock(mouse_mutex);
+        mouse_look.SetRawInputAvailable(registered);
     }
 }
 
@@ -624,21 +608,11 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         }
         RAWINPUT raw{};
         UINT size = sizeof(raw);
-        if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lp), RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) != (UINT)-1) {
-            if (raw.header.dwType == RIM_TYPEMOUSE) {
-                int dx = 0, dy = 0;
-                if ((raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
-                    dx = raw.data.mouse.lLastX;
-                    dy = raw.data.mouse.lLastY;
-                }
-                if (dx != 0 || dy != 0) {
-                    std::lock_guard lock(mouse_mutex);
-                    look_dx += static_cast<float>(dx);
-                    look_dy += static_cast<float>(dy);
-                    last_look_time = Clock::now();
-                    has_raw_delta = true;
-                }
-            }
+        const UINT bytes = GetRawInputData(reinterpret_cast<HRAWINPUT>(lp), RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER));
+        if (bytes != (UINT)-1 && bytes >= sizeof(RAWINPUTHEADER) + sizeof(RAWMOUSE) &&
+            raw.header.dwType == RIM_TYPEMOUSE && (raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
+            std::lock_guard lock(mouse_mutex);
+            mouse_look.AddRaw(raw.data.mouse.lLastX, raw.data.mouse.lLastY);
         }
         return false;
     }
@@ -742,11 +716,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
                     }
                 }
             } else if (window_focused.load(std::memory_order_relaxed)) {
-                if (!has_raw_delta) {
-                    look_dx += static_cast<float>(dx);
-                    look_dy += static_cast<float>(dy);
-                    last_look_time = Clock::now();
-                }
+                mouse_look.AddFallback(dx, dy);
                 POINT center{};
                 if (CenterCursorInWindow(hwnd, center)) {
                     last_cursor_x = center.x;
@@ -818,9 +788,7 @@ void KeyboardPad(int port, input::Pad& pad) {
                 if (right_pressed || mouse_right.Sample(now)) pad.analog[1] = 255;
                 pad.buttons |= dpad_steps.Sample(now);
             }
-            look_dx = 0.0f;
-            look_dy = 0.0f;
-            has_raw_delta = false;
+            mouse_look.Reset();
         } else {
             enter_steps.Reset();
             // In gameplay:
@@ -828,27 +796,13 @@ void KeyboardPad(int port, input::Pad& pad) {
             // Right Click = Left Trigger (Lock-On / Guard)
             // Mouse Move = Camera Look (Right Analog Stick)
 
-            if (now - last_look_time > std::chrono::milliseconds(50)) {
-                look_dx = 0.0f;
-                look_dy = 0.0f;
-                has_raw_delta = false;
+            if (!window_focused.load(std::memory_order_relaxed)) {
+                mouse_look.Reset();
             } else {
-                float dy = look_dy;
-                if (mouse_invert_y.load(std::memory_order_relaxed)) {
-                    dy = -dy;
-                }
-                if (int16_t rx = StickFromLookDelta(look_dx)) pad.rx = rx;
-                if (int16_t ry = StickFromLookDelta(-dy)) pad.ry = ry;
-
-                if (mouse_smoothing.load(std::memory_order_relaxed)) {
-                    look_dx *= 0.20f;
-                    look_dy *= 0.20f;
-                    if (std::abs(look_dx) < 0.25f) look_dx = 0.0f;
-                    if (std::abs(look_dy) < 0.25f) look_dy = 0.0f;
-                } else {
-                    look_dx = 0.0f;
-                    look_dy = 0.0f;
-                }
+                const MouseStick look = mouse_look.Poll(std::chrono::duration<double>(now.time_since_epoch()).count(),
+                    GetMouseSensitivityX(), GetMouseSensitivityY(), GetMouseInvertY(), GetMouseSmoothing());
+                if (look.x) pad.rx = look.x;
+                if (look.y) pad.ry = look.y;
             }
         }
     }
