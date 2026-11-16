@@ -12,6 +12,8 @@
 namespace hulk {
 int changes = 0; void NoteSettingChanged() { ++changes; }
 void SetMouseSensitivity(float) {} float GetMouseSensitivity() { return 1; }
+void SetMouseSensitivityX(float) {} float GetMouseSensitivityX() { return 1; }
+void SetMouseSensitivityY(float) {} float GetMouseSensitivityY() { return 1; }
 void SetMouseInvertY(bool) {} bool GetMouseInvertY() { return false; }
 void SetMouseSmoothing(bool) {} bool GetMouseSmoothing() { return false; }
 void SetCameraInvert(bool, bool) {} bool GetCameraInvertX() { return false; } bool GetCameraInvertY() { return false; }
