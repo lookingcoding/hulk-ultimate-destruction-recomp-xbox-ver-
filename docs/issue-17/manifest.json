@@ -1,0 +1,99 @@
+{
+    "renderer":  "Actual Dear ImGui draw commands and font atlas, CPU rasterization, WIC PNG encoding",
+    "scope":  "Controls panel region; no running game, graphics device, audio engine, or OS input injection",
+    "interaction_assertions_per_viewport":  22,
+    "ctest_passed":  10,
+    "ctest_failed":  0,
+    "source_hashing":  "SHA-256 of UTF-8 source text, LF line endings, no BOM",
+    "source_sha256":  {
+                          "src/common/controls_ui.cpp":  "DCE5E43DA5C3E25DCDE2E6A0B6CDA03F497DF04C9030ECF5093782C048305A8F",
+                          "src/common/bindings.cpp":  "E6480886614D18DB5095D3517000701C040D38AC49F37F9193CB9CEB9293C8A4",
+                          "src/common/bindings.h":  "41999ACD8B3CFC82468FB2FB3C92F7585F1072758237F334737108C260B1024C",
+                          "tests/controls_ui.cpp":  "6FCBC0699A6CFD439A7B04211C61E2C5FB11FEF0F60C33CE6ABB5C3849208475",
+                          "tests/controls_capture.cpp":  "E9A1054291E142454F015EE4541F784B6BF80A392E07B99AACA01EA91BF53A0B",
+                          "tests/controls_capture.h":  "A5E7B08B3F7C5DD0A753B9A04F2F3C2AD85FB36AC8F7C84183B7E5CBB92256CE",
+                          "CMakeLists.txt":  "7E6ACC489E709854AF04CC2D57A52C9417F56D60D6EE51BA4B6F7E6F5BC9337F"
+                      },
+    "screenshots":  [
+                        {
+                            "file":  "controls-default.png",
+                            "viewport":  "1280x720",
+                            "panel_pixels":  [
+                                                 720,
+                                                 684
+                                             ],
+                            "sha256":  "BB90F79412C638D982497F6B1B5FB5C84905AEA273543F62AED0624848BD1131",
+                            "bytes":  15010
+                        },
+                        {
+                            "file":  "controls-listening.png",
+                            "viewport":  "1280x720",
+                            "panel_pixels":  [
+                                                 720,
+                                                 684
+                                             ],
+                            "sha256":  "1A05C7499B48DE17C288B68C4ED9E86546A72BF8C35B18C7F9C12B9E29A225D2",
+                            "bytes":  15216
+                        },
+                        {
+                            "file":  "controls-conflict.png",
+                            "viewport":  "800x600",
+                            "panel_pixels":  [
+                                                 720,
+                                                 570
+                                             ],
+                            "sha256":  "6A589C18F267FA13CC6E0520ED0DF8BB84BDA8DA963FF47151FA871F0C8920B4",
+                            "bytes":  15484
+                        },
+                        {
+                            "file":  "controls-reset.png",
+                            "viewport":  "1280x720",
+                            "panel_pixels":  [
+                                                 720,
+                                                 684
+                                             ],
+                            "sha256":  "20F37926B30FDA35AC39AE468AC1E6796B640FF99D08B1BF4ED2BC3765BA693E",
+                            "bytes":  16985
+                        },
+                        {
+                            "file":  "controls-keyboard.png",
+                            "viewport":  "1280x720",
+                            "panel_pixels":  [
+                                                 720,
+                                                 684
+                                             ],
+                            "sha256":  "11552C52445527F5859AF1D658CB9F8C517218BFEC5FC823580EB0F3D304BB6B",
+                            "bytes":  15000
+                        },
+                        {
+                            "file":  "controls-small.png",
+                            "viewport":  "800x600",
+                            "panel_pixels":  [
+                                                 720,
+                                                 570
+                                             ],
+                            "sha256":  "72599261ADFBB3DE5702416F56B443C6E7379B97935B723D26FD093318F4EF9F",
+                            "bytes":  13076
+                        },
+                        {
+                            "file":  "controls-menu-zoom.png",
+                            "viewport":  "1280x720",
+                            "panel_pixels":  [
+                                                 720,
+                                                 684
+                                             ],
+                            "sha256":  "0430B886BAF0B0EC5D18CAE5FCCE97492616FE1973A612C89A0C801B25AFD1BF",
+                            "bytes":  16976
+                        },
+                        {
+                            "file":  "controls-multiple.png",
+                            "viewport":  "1280x720",
+                            "panel_pixels":  [
+                                                 720,
+                                                 684
+                                             ],
+                            "sha256":  "B1E5D1667BD8F68C6309789F3E6491B5431D034B1B8627A5876978C90CDF269B",
+                            "bytes":  15237
+                        }
+                    ]
+}

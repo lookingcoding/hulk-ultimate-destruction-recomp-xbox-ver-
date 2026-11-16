@@ -124,6 +124,7 @@ void DrawControls(double) {
     const bool first_frame = generation != last_generation;
     if (first_frame) {
         last_generation = generation;
+        selected = 0;
         previous_config = io.ConfigFlags;
         previous_backend = io.BackendFlags;
         pending_action.reset(); pending_input.reset();
@@ -144,7 +145,7 @@ void DrawControls(double) {
     }
     if (contents) {
         ImGui::TextWrapped("Select an action, then press a key or mouse button. Tab/arrows and Enter navigate; controller A selects, B goes back.");
-        ImGui::TextWrapped("Escape can be bound. Use Cancel capture to cancel. Shared gameplay/menu inputs are allowed.");
+        ImGui::TextWrapped("Escape can be bound. Use Cancel capture to cancel. You can share keys between gameplay and menus.");
         const bool block_edit = capturing.has_value() || pending_action.has_value();
         const bool canceled_capture = capturing.has_value() && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false);
         if (canceled_capture) { capturing.reset(); captured.reset(); }
@@ -175,7 +176,11 @@ void DrawControls(double) {
                 const auto action = bindings::Action(i);
                 const std::string row = std::string(bindings::Info(action).label) + "    [" + bindings::Label(*snapshot, action) + "]###binding";
                 ImGui::PushID(int(i));
-                if (ImGui::Selectable(row.c_str(), selected == int(i))) {
+                if (first_frame && i == 0) ImGui::SetKeyboardFocusHere();
+                const bool clicked = ImGui::Selectable(row.c_str(), selected == int(i));
+                const bool entered = !block_edit && ImGui::IsItemFocused() &&
+                    (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
+                if (clicked || entered) {
                     selected = int(i); capturing = action; captured.reset();
                 }
                 if (first_frame && i == 0) ImGui::SetItemDefaultFocus();
