@@ -583,12 +583,8 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         }
     };
     if (message == WM_KEYDOWN || message == WM_KEYUP || message == WM_SYSKEYDOWN || message == WM_SYSKEYUP) {
-        unsigned code = unsigned(wp);
-        if (code == VK_SHIFT) code = MapVirtualKeyW((unsigned(lp) >> 16) & 0xff, MAPVK_VSC_TO_VK_EX);
-        if (!code) code = unsigned(wp); // synthetic messages may omit a scan code
-        if (code == VK_CONTROL) code = (lp & (intptr_t(1) << 24)) ? VK_RCONTROL : VK_LCONTROL;
-        if (code == VK_MENU) code = (lp & (intptr_t(1) << 24)) ? VK_RMENU : VK_LMENU;
-        if (code < keys.size()) press(bindings::Input(code), message == WM_KEYDOWN || message == WM_SYSKEYDOWN);
+        const auto code = bindings::KeyInput(uint32_t(wp), lp);
+        if (code) press(code, message == WM_KEYDOWN || message == WM_SYSKEYDOWN);
         return false;
     }
     switch (message) {

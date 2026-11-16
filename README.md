@@ -21,10 +21,10 @@ The game checks your disc image when it starts and tells you if it can't use it.
 ## Features & Improvements
 
 - **Native PC Mouse Look & Camera Overhaul:**
-  - True 1:1 raw mouse sensor input via Windows Raw Input (`WM_INPUT`).
-  - Instantaneous camera stop when mouse stops (no floaty lag or artificial deceleration).
-  - Continuous dynamic deadzone blending for pixel-precise micro-aiming without abrupt stick jumps.
-  - Full sensitivity slider and vertical look inversion (Invert Y).
+  - Windows Raw Input (`WM_INPUT`), with cursor-delta fallback when raw input is unavailable.
+  - Mouse displacement is scaled by elapsed time, clears the camera's deadzone, and survives extra input polls and the right-stick cap.
+  - Independent X/Y sensitivity sliders and vertical inversion in **Options > Controls / Keybinds**.
+  - The game's native camera still limits turning speed and acceleration. Fast swipes retain excess motion for subsequent updates, so they can leave a motion tail.
 - **Direct Mouse Hit-Testing & Menu Navigation:**
   - Hovering a menu row or tab highlights it and clicking selects it. The port reads the game's real highlighted row and steps the D-pad until it matches the one under the pointer, so greyed-out rows, wrapping and every list length work.
   - Clicking a tab (Options / Story Mode / Extras) from inside a list goes back and opens that tab. Clicking or scrolling on a selector changes its value.
@@ -64,6 +64,17 @@ The game checks your disc image when it starts and tells you if it can't use it.
 Open **Options > Controls / Keybinds** from the main menu or pause menu to change controls in the game. Every action shows its current inputs. Select a row and press a key, mouse button, or wheel direction. Enable **Add another input** to keep the current binding; **Unbind selected** clears it. Conflicts within the same gameplay/menu context offer **Replace conflicting bindings**, **Keep both**, or **Cancel**. Gameplay and menu actions may share inputs. **Reset to defaults** restores all bindings, both sensitivities, and mouse inversion.
 
 The same panel has separate **Mouse sensitivity X** and **Mouse sensitivity Y** sliders and **Invert mouse Y**. Changes apply immediately and save after settling; **Save and close** saves immediately. Escape closes the panel when it is not capturing a binding. During capture, Escape itself can be bound; use **Cancel capture** to cancel.
+
+Sensitivity multipliers range from 0.1 to 5.0, with both axes defaulting to 1.0. These keys go at the top level of `game/settings.toml`, before `[bindings]` (source builds use `settings.toml` beside the game executable):
+
+```toml
+mouse_sensitivity_x = 1.0
+mouse_sensitivity_y = 1.0
+mouse_invert_y = false
+mouse_smoothing = false
+```
+
+The older `mouse_sensitivity` value initializes both axes; explicit X/Y values override it. The Controls panel shows current bindings. Existing game tooltips and mission hints continue to show the default keys.
 
 Bindings are stored in the `[bindings]` table of `game/settings.toml`. Each action accepts a name or an array of names. `[]` or `"unbound"` disables an action. Missing or invalid entries use that action's defaults; an invalid array falls back as a whole. Names are case-insensitive, including letters, digits, F1-F24, arrows, Space, Enter, Escape, Tab, Delete, Shift/Ctrl/Alt and their Left/Right variants, Num0-Num9, MouseLeft/MouseRight/MouseMiddle/MouseX1/MouseX2, and WheelUp/Down/Left/Right.
 

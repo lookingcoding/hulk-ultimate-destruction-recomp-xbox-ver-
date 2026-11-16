@@ -33,6 +33,9 @@ void ApplyPrompts(bool controller) {
 }
 
 void OnInit() {
+    hulk::SetControlsMouseHooks({hulk::GetMouseSensitivityX, hulk::SetMouseSensitivityX,
+        hulk::GetMouseSensitivityY, hulk::SetMouseSensitivityY,
+        hulk::GetMouseInvertY, hulk::SetMouseInvertY});
     hulk::InitDiagnostics();
     hulk::RunMatchingRelease();  // the other release's game in assets: its own executable runs it
     hulk::LoadMods();            // mods\ beside assets (mods.h)
@@ -63,17 +66,6 @@ void OnPad(int port, input::Pad& pad) {
 
 bool OnMessage(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t* result) {
     if (hulk::ControlsMessage(message, wp, lp, result)) return true;
-    // the mouse wheel in play: the camera closer (up) or farther (down), gliding a kCameraZoomStep a notch (view.h)
-    constexpr uint32_t kMouseWheel = 0x020A;
-    constexpr int kWheelDelta = 120;
-    if (message == kMouseWheel && hulk::InGameplay()) {
-        static int accumulated = 0;
-        accumulated += int16_t(uint16_t(wp >> 16));
-        int steps = 0;
-        for (; accumulated >= kWheelDelta; accumulated -= kWheelDelta) steps--;
-        for (; accumulated <= -kWheelDelta; accumulated += kWheelDelta) steps++;
-        if (steps && hulk::StepCameraDistance(steps)) hulk::NoteSettingChanged();
-    }
     return hulk::KeyboardMessage(hwnd, message, wp, lp, result);
 }
 }  // namespace
