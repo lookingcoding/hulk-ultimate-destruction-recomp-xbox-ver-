@@ -1,6 +1,7 @@
 #include "app/app.h"
 #include "common/addresses.h"
 #include "common/camera.h"
+#include "common/controls_ui.h"
 #include "common/diagnostics.h"
 #include "common/display_menu.h"
 #include "common/keyboard.h"
@@ -56,10 +57,12 @@ void OnPad(int port, input::Pad& pad) {
         ApplyPrompts(pad.connected);  // a physical controller; keyboard input joins after
         hulk::SetGamepadDetected(pad.connected);
     }
+    hulk::ControlsPad(port, pad);
     hulk::KeyboardPad(port, pad);
 }
 
 bool OnMessage(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t* result) {
+    if (hulk::ControlsMessage(message, wp, lp, result)) return true;
     // the mouse wheel in play: the camera closer (up) or farther (down), gliding a kCameraZoomStep a notch (view.h)
     constexpr uint32_t kMouseWheel = 0x020A;
     constexpr int kWheelDelta = 120;
@@ -93,7 +96,7 @@ const app::GameInfo app::kGame = {
     .loaded = OnImageLoaded,                         // image in memory, before its entry point runs
     .window = OnWindowReady,                         // the game window is up
     .message = OnMessage,
-    .ui = nullptr,                                   // display settings are a screen of the game's own Options
+    .ui = hulk::DrawControls,                        // native Options opens the in-game Controls panel
     .pad = OnPad,
     .rumble = nullptr,                               // changes a rumble before it is set
     .file = hulk::ModFileView,                       // mods, and misc.rcf with the Display Options screen

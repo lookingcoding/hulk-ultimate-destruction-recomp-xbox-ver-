@@ -61,7 +61,24 @@ The game checks your disc image when it starts and tells you if it can't use it.
 
 ## PC Controls
 
-Keyboard and mouse input is mapped to player 1 alongside any connected Xbox/PlayStation controller:
+Open **Options > Controls / Keybinds** from the main menu or pause menu to change controls in the game. Every action shows its current inputs. Select a row and press a key, mouse button, or wheel direction. Enable **Add another input** to keep the current binding; **Unbind selected** clears it. Conflicts within the same gameplay/menu context offer **Replace conflicting bindings**, **Keep both**, or **Cancel**. Gameplay and menu actions may share inputs. **Reset to defaults** restores all bindings, both sensitivities, and mouse inversion.
+
+The same panel has separate **Mouse sensitivity X** and **Mouse sensitivity Y** sliders and **Invert mouse Y**. Changes apply immediately and save after settling; **Save and close** saves immediately. Escape closes the panel when it is not capturing a binding. During capture, Escape itself can be bound; use **Cancel capture** to cancel.
+
+Bindings are stored in the `[bindings]` table of `game/settings.toml`. Each action accepts a name or an array of names. `[]` or `"unbound"` disables an action. Missing or invalid entries use that action's defaults; an invalid array falls back as a whole. Names are case-insensitive, including letters, digits, F1-F24, arrows, Space, Enter, Escape, Tab, Delete, Shift/Ctrl/Alt and their Left/Right variants, Num0-Num9, MouseLeft/MouseRight/MouseMiddle/MouseX1/MouseX2, and WheelUp/Down/Left/Right.
+
+```toml
+[bindings]
+move_up = ["W", "Up"]
+attack = ["MouseLeft", "K"]
+menu_select = ["Enter"]
+zoom_in = ["WheelUp"]
+taunt = [] # unbound
+```
+
+`menu_select` selects ordinary menu rows and advances selectors once per press. It is separate from gameplay `jump` (Space/Enter) and menu `menu_confirm` (Space/left click), preserving the default contextual behavior. The controls panel lists every action in the source model (`src/common/bindings.h`); controller bindings remain native and merge with keyboard/mouse input.
+
+Keyboard and mouse input is mapped to player 1 alongside any connected Xbox/PlayStation controller. These are the defaults:
 
 | PC Control | Action | Xbox Controller Equivalent |
 | :--- | :--- | :--- |

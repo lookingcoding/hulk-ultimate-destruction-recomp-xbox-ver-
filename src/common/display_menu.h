@@ -44,5 +44,7 @@ bool DisplaySync(X86Context& ctx, uint32_t owner);
 void TickDisplaySettings();
 // a setting changed outside the menu (the mouse wheel's camera distance): saved once it settles
 void NoteSettingChanged();
+// Native Options button: consumed by the host Controls panel, without adding a guest screen.
+bool TakeControlsRequest();
 
 }  // namespace hulk
