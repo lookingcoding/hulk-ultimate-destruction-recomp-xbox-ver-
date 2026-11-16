@@ -1,0 +1,251 @@
+{
+  "captured": "2026-11-16",
+  "renderer": "EU retail game, native Dolly frontend, D3D11 final.bmp converted to PNG without redrawing/cropping",
+  "layout": "Controls parent with separate native Keybinds page; seven actions per page; Primary | Alternate",
+  "physical_desktop_input": false,
+  "audio": "Mixer samples discarded; no XAudio2 device initialized",
+  "safety": {
+    "Pid": 43852,
+    "Observations": 1429,
+    "VisibleOrForegroundViolations": 0,
+    "Seconds": 166.1700467,
+    "Audio": "samples discarded; no XAudio2 device",
+    "Input": "internal replay only"
+  },
+  "builds": {
+    "EU_EXE_DLL": "PASS",
+    "USA_EXE_DLL": "PASS",
+    "CTest": "12/12 PASS",
+    "fresh_SDK_patch_queue": "PASS",
+    "incremental_SDK_patch_loop": "PASS"
+  },
+  "native_ui_checks": {
+    "independent_X_slider": [
+      1.1,
+      1.0
+    ],
+    "keep_both_move_up_and_down": [
+      "S",
+      "S"
+    ],
+    "held_B_cancel_stays_on_keybinds": true,
+    "keybind_reset_preserves_mouse_X": 1.1,
+    "mouse_reset_final_XY": [
+      1.0,
+      1.0
+    ],
+    "keybinds_reopened": true
+  },
+  "settings_after_both_resets": {
+    "x": 1.0,
+    "y": 1.0,
+    "move_up": [
+      "W"
+    ],
+    "move_down": [
+      "S"
+    ]
+  },
+  "binaries_sha256": {
+    "HulkRecompiled.exe": "a02d3ff0a03a69ab7b0801124db863631296b22edb68a1006a4e9b14f4955a4c",
+    "HulkRecompiled.dll": "8788b683741a92d61b2f165a3d91c9a39a0fec3b9764247beecae90a1f1a1121",
+    "HulkRecompiledUSA.exe": "9005a0c63765d04694bb7f5f5bed5dadf37e58288b713a8bec42f585b1f054a7",
+    "HulkRecompiledUSA.dll": "b9bddc2101609efc8e07298aaffe38941368acc50ef917d63bb91dec71c19d81"
+  },
+  "source_sha256_normalized_LF": {
+    "src/common/native_controls.cpp": "484b005408116361712fee89a11b51555146b0ce13fffe6c2ce09498152e247b",
+    "src/common/native_controls.h": "fdb62568e6c7e0b0873c55736bde31000c3969347ac2fb92235c50bdc382b004",
+    "src/common/native_screen.cpp": "419a31f8c48ba7d31a0d84dbd3c75099ed2dce4725650a3be8a544a67253c75a",
+    "src/common/native_screen.h": "a574cd4b9adeeed8aed6f56400fe8823543fb9bdebcb4f9f838f509f92a957a5",
+    "src/common/display_menu.cpp": "ded053c3b4150392b06748d83a9d6411510cf21bd6986d98adaddacfef2d7fb7",
+    "src/common/addresses.h": "cddbe4d02bf8238c42b1efa2c126aaf9aa62bb8ad3df87165d2a8757c19df516",
+    "src/common/keyboard.cpp": "0d08485c80f8ea9d73dbf8a85a5e5a20faefe6989b9cb223c3ea16a4efc964c2",
+    "src/common/game_info.cpp": "566392c16fa0d6285a6f9e1608077b2495380498b95f0eab7580e8fb45759b72",
+    "src/common/bindings.cpp": "e6480886614d18db5095d3517000701c040d38ac49f37f9193cb9ceb9293c8a4",
+    "src/common/mouse_look.cpp": "5f04a428f2a1d323634ce1c4235669a24f9cdaa4fadb67f239f6cd30d77eb4d2",
+    "src/common/settings_ui.cpp": "fb15fc40d8c0c9e6c715c7a3c94e08a9cbe3f4a783fca872c1fd92a832884df0",
+    "src/common/replay.cpp": "5d7809cc4f8259dc35c3cfa3d26d8a8d5acb99886f9bd2fca729e7b1492d57c0",
+    "src/game/hooks.cpp": "9032d7060c4e6f004bb1f5fb0d587bb1a54b873f1249e94544a585de5dcbf036",
+    "tests/native_controls.cpp": "cfee7e57374ef7152500ecb91c3de809b656be6b40e7bdd5236685f224bfd2f2",
+    "tests/native_screen.cpp": "09a7506b35a4c07ebfad69f62eb4a0a0d7727ba1876f685af64246a207654ae8",
+    "tests/display_menu.cpp": "1a117428c0b1db7b7dfc8e11937723b24998a5776cdef49f34acd69ee69ccef0",
+    "tests/fixtures/native-controls.input": "26239d3ae269931471035b419e5b70d4cf2abeabbd352bb78c163e2f7227af79",
+    "tools/Test-NativeControls.ps1": "47affde856052f6f5f11cc9488c2829a6e9a54107eec866be30153406886012b",
+    "tools/Build.ps1": "337bbe93973b2bc061c384bb6e6b4dcd19d14ab387dcbeb3f05230e9e5c9dc18",
+    "CMakeLists.txt": "9b95b51c6f9a15cb13595d17d4becc4eccde3546de31eda9117abbf90e1df9b7",
+    "AGENTS.md": "b6447d8a425a8a992b421e241ee770d8105437045d53b2de9a3510e65c5305b6"
+  },
+  "logs_sha256": {
+    "build-final.log": "8d3bcc747780f4189dc6c773b257cbb692a7903f54e9c9a612c44c9d207d352b",
+    "ctest-final.log": "bb49de27ae953b249556d37d0827f2dd469a0975cad46410f8860b81cc4ec131",
+    "patch-check.log": "90540088a1956df3f8367721e23e8ad9b83bed9a5b42cd8404f242c3cc6e7bfa"
+  },
+  "images": {
+    "native-options.png": {
+      "sha256": "a135caaa2d76d25db3f79b13857827058a9bfe68cfed5a1771f5ea88d9fdda8a",
+      "bytes": 359763,
+      "capture_seconds": 80,
+      "source_final_bmp_sha256": "0ecceef024911e0682dbde7078373f52afbb4d690f992eaf1fe2dfcd44e0b956",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-display.png": {
+      "sha256": "31e18d282ccadcf879ff8d5f1bdb2029e30792fb99dc156f51218e922ac69236",
+      "bytes": 353075,
+      "capture_seconds": 86,
+      "source_final_bmp_sha256": "7aade28bd888b7f72af14a0c0c560b011b2ffde1935995477fdee9b199282843",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-controls.png": {
+      "sha256": "85a16a49a6b64d4fce1fa56f458ca7f11be722b44d26e15a2949e14bb6d83a89",
+      "bytes": 379476,
+      "capture_seconds": 92,
+      "source_final_bmp_sha256": "aa356ec21db33d3a68b4c2108e3dec5bb76715bac5d4fef12c9f2df85f3b2319",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-sensitivity.png": {
+      "sha256": "62afd21aa719f61c1f837a59fcb1d70bc4bcb1afb1003c8507f3c70875c79d8b",
+      "bytes": 403707,
+      "capture_seconds": 98,
+      "source_final_bmp_sha256": "db877c657b0d2b9057e3f1b979deb4382d52b9fafaa51341e6f2e291747b463d",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-keybinds.png": {
+      "sha256": "eb90ecaa9a2fc91985366a7a5b143a897c38480ec777cdd7db75f20a1338ef46",
+      "bytes": 405882,
+      "capture_seconds": 102,
+      "source_final_bmp_sha256": "5281d3f4bfec0a8dfa1a5aee6d70460a4b5caf8fbf169415afdf5b3f151b9afc",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-slot-picker.png": {
+      "sha256": "cc4f724aee8160df8b2ba09f44da0f853b35b41b605abde3692df015a83a76a6",
+      "bytes": 192106,
+      "capture_seconds": 106,
+      "source_final_bmp_sha256": "5c5a5e93862dcb3b2ce38ad9d1d756025a0d9c1d10af530fe9ddacd302725ae3",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-capture.png": {
+      "sha256": "854448d8b4c0640de034132f154fcc8acbc240ef39fab6f4bf74407de814c9b4",
+      "bytes": 192225,
+      "capture_seconds": 110,
+      "source_final_bmp_sha256": "23e83e058ecbedabe8a7c250361fcda544e03e16d0bfd3eadb0651ddeba1eaa8",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-conflict.png": {
+      "sha256": "94d453540c9b057286fdf1ce3fe722a524ff44d7a720676314ca12119a03cb11",
+      "bytes": 173366,
+      "capture_seconds": 114,
+      "source_final_bmp_sha256": "e3523a2fa06880953a0a1dd8313abc4e00cedf96a87cc2731be0e94350e0b8c1",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-keep-both.png": {
+      "sha256": "9a63aed3cdfb0ab067eec8b46d7daf34a0cd26a31ae1ca9e7b3547a067855b9d",
+      "bytes": 463434,
+      "capture_seconds": 120,
+      "source_final_bmp_sha256": "27b2eb8a4bb42d711a74a2120617269950066f3c496ebcfb33ead891e522e9f6",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-reset.png": {
+      "sha256": "5576067759cc9d6ab1364ebff7fa10352ce2d56811eb67ca178ab18c00ab8706",
+      "bytes": 139578,
+      "capture_seconds": 124,
+      "source_final_bmp_sha256": "2de77246f72b8b2026033760ad39563519e898c684b3655eb72e43847a7e9459",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-actions-page2.png": {
+      "sha256": "786a5e93357b269bdb5d5e80ff4c1fffbfe216c90148de3801262ac51e128f70",
+      "bytes": 395176,
+      "capture_seconds": 130,
+      "source_final_bmp_sha256": "c7b181d0947db09f462fe1708959ba97c32f97f546fa1283ef9b560bdf4384ca",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-keybinds-reset-applied.png": {
+      "sha256": "2a5a91bd143152d6d3ed319b3face64772b03916a89d254b6f4d47d78880314b",
+      "bytes": 339227,
+      "capture_seconds": 140,
+      "source_final_bmp_sha256": "20a7f51d5ba8a4e90e5bb23e4781129b4a497b615541ebf5bbe6448aca632a49",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-mouse-preserved.png": {
+      "sha256": "35bdf697697c4503bf5153f28b5c57625181f1720d132b40b2e2fc9f25c87529",
+      "bytes": 507625,
+      "capture_seconds": 144,
+      "source_final_bmp_sha256": "5c0a55b48815a14d388e41f143646e1a107f2ae4e97e44be24afeb3606ab04f9",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-mouse-reset.png": {
+      "sha256": "5a41dfc09dd40f53604a5ad5f13a8a3aa12f05b5806d2866d9958ab48ab1db4e",
+      "bytes": 179209,
+      "capture_seconds": 148,
+      "source_final_bmp_sha256": "651205e349abddfbf582ad140092e66f238bd9db905c1a375ba9eebb6997e799",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-reset-applied.png": {
+      "sha256": "c8f2200e08f93c6d79c37a3a4fd16d35bc83e855e579786338a01b0e18c96005",
+      "bytes": 311233,
+      "capture_seconds": 154,
+      "source_final_bmp_sha256": "a65f904d47bd3b06a1e869e0617637efb819f444b6c72aeb7ad35890832cf5bf",
+      "dimensions": [
+        640,
+        480
+      ]
+    },
+    "native-keybinds-reopened.png": {
+      "sha256": "e6996d375b8fad2474a968ea39b05ce3b00e2824875c5bad31cd72171252fd4d",
+      "bytes": 315568,
+      "capture_seconds": 160,
+      "source_final_bmp_sha256": "afef2a9c26d6adb73639ebb7aef734c1dc1be5d1f15e7c3c60b8ac9914dff710",
+      "dimensions": [
+        640,
+        480
+      ]
+    }
+  },
+  "limits": [
+    "EU screenshots; USA build and callback tests",
+    "No subjective camera-feel measurement on reporter hardware",
+    "Guest tooltips retain default key names",
+    "Native camera angular speed/acceleration cap remains"
+  ]
+}

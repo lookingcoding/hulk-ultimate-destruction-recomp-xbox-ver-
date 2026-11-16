@@ -15,6 +15,11 @@
 #include <vector>
 #include "common/addresses.h"
 #include "common/keyboard.h"
+#include "common/bindings.h"
+#include "common/native_controls.h"
+#include "common/input_mapping.h"
+#include "common/display_menu.h"
+#include "common/view.h"
 #include "common/replay.h"
 #include "core/input.h"
 #include "kernel/memory.h"
@@ -34,8 +39,6 @@ constexpr int kMinPollsPerPhase = 1;
 constexpr int kMenuMoveStepPixels = 40;
 constexpr size_t kMaxQueuedSteps = 4;
 constexpr UINT kSyncCursorMsg = WM_APP + 42;
-constexpr float kCameraDeadzone = 7500.0f;
-constexpr float kCameraSensitivity = 950.0f;
 
 struct ButtonLatch {
     bool held = false;
@@ -117,7 +120,7 @@ struct StepQueue {
     }
 };
 
-std::array<std::atomic<bool>, 256> keys{};
+std::array<std::atomic<bool>, bindings::InputCount> keys{};
 std::atomic<bool> enter_on_selector{false};
 std::atomic<HWND> game_hwnd{nullptr};
 std::atomic<bool> window_focused{true};
@@ -136,7 +139,8 @@ std::atomic<int> last_polled_menu_state{-1};
 std::atomic<bool> raw_input_registered{false};
 
 // Configurable PC controls (persisted in settings.toml)
-std::atomic<float> mouse_sensitivity{1.0f};
+std::atomic<float> mouse_sensitivity_x{kMouseSensitivityDefault};
+std::atomic<float> mouse_sensitivity_y{kMouseSensitivityDefault};
 std::atomic<bool> mouse_invert_y{false};
 std::atomic<bool> mouse_smoothing{false};
 
@@ -161,6 +165,9 @@ std::mutex mouse_mutex;
 MenuTarget menu_target{};
 ButtonLatch mouse_left{};
 ButtonLatch mouse_right{};
+std::array<ButtonLatch, bindings::InputCount> binding_latches{};
+bool pointer_confirm_pending = false;
+std::atomic<bool> controls_were_open{false};
 StepQueue dpad_steps{};
 StepQueue enter_steps{};
 int wheel_v_accum = 0;
@@ -170,10 +177,7 @@ int last_cursor_x = 0;
 int last_cursor_y = 0;
 int move_accum_x = 0;
 int move_accum_y = 0;
-float look_dx = 0.0f;
-float look_dy = 0.0f;
-bool has_raw_delta = false;
-Clock::time_point last_look_time{};
+MouseLook mouse_look{};
 
 bool Down(unsigned key) { return keys[key].load(std::memory_order_relaxed); }
 
@@ -242,6 +246,7 @@ std::optional<Slot> HighlightedSlot(bool* selector = nullptr) {
     uint32_t mgr = 0, screen = 0, dialog = 0, text = 0, lo = 0, hi = 0;
     if (!ReadGuestU32(base, hulk::addr::kFrontend, mgr) || !mgr) return std::nullopt;
     if (!ReadGuestU32(base, mgr + 0x1760u, dialog) || dialog) return std::nullopt;
+    if (!ReadGuestU32(base, mgr + 0x2218u, dialog) || dialog) return std::nullopt;
     if (!ReadGuestU32(base, mgr + 0x175Cu, screen) || !screen) return std::nullopt;
     if (!ReadGuestU32(base, screen + 0x48u, text) || !text) return std::nullopt;
     if (!ReadGuestU32(base, text + 0x20u, lo) || !ReadGuestU32(base, text + 0x24u, hi)) return std::nullopt;
@@ -257,7 +262,7 @@ std::optional<Slot> HighlightedSlot(bool* selector = nullptr) {
                 uint32_t child = 0, label = 0, vtable = 0;
                 if (!ReadGuestU32(base, screen + 0x44Cu + i * 4, child) || !child) break;
                 if (ReadGuestU32(base, child + kLabelPointer, label) && label == text &&
-                    ReadGuestU32(base, child, vtable) && vtable == hulk::addr::kTextSelectorVtable) {
+                    ReadGuestU32(base, child, vtable) && (vtable == hulk::addr::kTextSelectorVtable || vtable == hulk::addr::kHSliderVtable)) {
                     *selector = true;
                     break;
                 }
@@ -354,7 +359,7 @@ void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
     const bool gamepad = gamepad_detected.load(std::memory_order_relaxed);
 
     CursorMode target_mode;
-    if (!focused) {
+    if (!focused || ControlsCapturing()) {
         target_mode = CursorMode::Visible;
     } else if (!in_menu) {
         target_mode = CursorMode::GameplayLock;
@@ -381,6 +386,7 @@ void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
             menu_target = MenuTarget{};
             move_accum_x = 0;
             move_accum_y = 0;
+            mouse_look.Reset();
             POINT center{};
             if (CenterCursorInWindow(hwnd, center)) {
                 has_cursor_pos = true;
@@ -404,8 +410,7 @@ void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
             menu_target = MenuTarget{};
             move_accum_x = 0;
             move_accum_y = 0;
-            look_dx = 0.0f;
-            look_dy = 0.0f;
+            mouse_look.Reset();
             has_cursor_pos = false;
             break;
         }
@@ -418,8 +423,7 @@ void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
                 ClipCursor(nullptr);
             }
             std::lock_guard lock(mouse_mutex);
-            look_dx = 0.0f;
-            look_dy = 0.0f;
+            mouse_look.Reset();
             has_cursor_pos = false;
             break;
         }
@@ -428,28 +432,14 @@ void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
     }
 }
 
-int16_t StickFromLookDelta(float delta) {
-    if (std::abs(delta) < 0.1f) return 0;
-    const float sign = delta < 0.0f ? -1.0f : 1.0f;
-    const float sens = mouse_sensitivity.load(std::memory_order_relaxed);
-    const float abs_d = std::abs(delta) * sens;
-
-    // Smooth deadzone blending:
-    // Hulk's camera engine requires stick values above ~7500 to rotate.
-    // Blend deadzone smoothly over the initial motion, then scale linearly.
-    const float blend = std::min(1.0f, abs_d / 2.5f);
-    const float deadzone = kCameraDeadzone * blend;
-    const float dynamic_rate = abs_d * kCameraSensitivity;
-    const float mag = deadzone + dynamic_rate;
-    return static_cast<int16_t>(std::clamp(sign * mag, -32767.0f, 32767.0f));
-}
-
 void Clear() {
     for (auto& key : keys) key.store(false, std::memory_order_relaxed);
     enter_on_selector.store(false, std::memory_order_relaxed);
     std::lock_guard lock(mouse_mutex);
     mouse_left.Reset();
     mouse_right.Reset();
+    for (auto& latch : binding_latches) latch.Reset();
+    pointer_confirm_pending = false;
     dpad_steps.Reset();
     enter_steps.Reset();
     menu_target = MenuTarget{};
@@ -458,14 +448,16 @@ void Clear() {
     has_cursor_pos = false;
     move_accum_x = 0;
     move_accum_y = 0;
-    look_dx = 0.0f;
-    look_dy = 0.0f;
-    has_raw_delta = false;
+    mouse_look.Reset();
 }
 }  // namespace
 
-void SetMouseSensitivity(float s) { mouse_sensitivity.store(std::clamp(s, 0.1f, 5.0f), std::memory_order_relaxed); }
-float GetMouseSensitivity() { return mouse_sensitivity.load(std::memory_order_relaxed); }
+void SetMouseSensitivity(float s) { SetMouseSensitivityX(s); SetMouseSensitivityY(s); }
+float GetMouseSensitivity() { return GetMouseSensitivityX(); }
+void SetMouseSensitivityX(float s) { mouse_sensitivity_x.store(SanitizeMouseSensitivity(s), std::memory_order_relaxed); }
+float GetMouseSensitivityX() { return mouse_sensitivity_x.load(std::memory_order_relaxed); }
+void SetMouseSensitivityY(float s) { mouse_sensitivity_y.store(SanitizeMouseSensitivity(s), std::memory_order_relaxed); }
+float GetMouseSensitivityY() { return mouse_sensitivity_y.load(std::memory_order_relaxed); }
 void SetMouseInvertY(bool invert) { mouse_invert_y.store(invert, std::memory_order_relaxed); }
 bool GetMouseInvertY() { return mouse_invert_y.load(std::memory_order_relaxed); }
 void SetMouseSmoothing(bool smoothing) { mouse_smoothing.store(smoothing, std::memory_order_relaxed); }
@@ -474,13 +466,16 @@ bool GetMouseSmoothing() { return mouse_smoothing.load(std::memory_order_relaxed
 void SetGameWindow(void* hwnd) {
     HWND w = static_cast<HWND>(hwnd);
     game_hwnd.store(w, std::memory_order_relaxed);
-    if (w && IsWindow(w) && !raw_input_registered.exchange(true, std::memory_order_relaxed)) {
+    if (w && IsWindow(w) && !raw_input_registered.load(std::memory_order_relaxed)) {
         RAWINPUTDEVICE rid{};
         rid.usUsagePage = 0x01;  // Generic Desktop Controls
         rid.usUsage = 0x02;      // Mouse
         rid.dwFlags = 0;
         rid.hwndTarget = w;
-        RegisterRawInputDevices(&rid, 1, sizeof(rid));
+        const bool registered = RegisterRawInputDevices(&rid, 1, sizeof(rid)) != FALSE;
+        raw_input_registered.store(registered, std::memory_order_relaxed);
+        std::lock_guard lock(mouse_mutex);
+        mouse_look.SetRawInputAvailable(registered);
     }
 }
 
@@ -547,21 +542,69 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         return true;
     }
 
-    if (message == WM_KEYDOWN || message == WM_KEYUP) {
-        if (wp < keys.size()) {
-            if (wp == VK_RETURN && message == WM_KEYDOWN && !Down(VK_RETURN)) {
-                bool selector = false;
-                if (in_menu) HighlightedSlot(&selector);
+    if (ControlsCapturing()) {
+        Clear();
+        ApplyCursorVisibilityOnWindowThread(hwnd, true);
+        return false;
+    }
+    const auto map = bindings::Get();
+    using Action = bindings::Action;
+    const auto matches = [&](Action action, bindings::Input code) { return bindings::Matches(*map, action, code); };
+    const auto press = [&](bindings::Input code, bool down) {
+        const bool mouse_input = code == VK_LBUTTON || code == VK_RBUTTON || code == VK_MBUTTON ||
+            code == VK_XBUTTON1 || code == VK_XBUTTON2 || code >= bindings::WheelUp;
+        if (in_menu && gamepad_detected.load(std::memory_order_relaxed) && mouse_input) {
+            keys[code].store(false, std::memory_order_relaxed);
+            std::lock_guard lock(mouse_mutex);
+            binding_latches[code].Reset();
+            return;
+        }
+        const bool fresh = down && !Down(code);
+        keys[code].store(down, std::memory_order_relaxed);
+        if (mouse_input) {
+            std::lock_guard lock(mouse_mutex);
+            if (down) binding_latches[code].Press(); else binding_latches[code].Release();
+        }
+        if (!fresh) return;
+        if (in_menu) {
+            bool selector = false;
+            if (matches(Action::MenuSelect, code)) {
+                HighlightedSlot(&selector);
                 enter_on_selector.store(selector, std::memory_order_relaxed);
                 if (selector) {
                     std::lock_guard lock(mouse_mutex);
                     menu_target.active = false;
-                    enter_steps.Push(0x08u);  // next choice, once per Enter press
+                    enter_steps.Push(0x08u);
                 }
             }
-            keys[wp].store(message == WM_KEYDOWN, std::memory_order_relaxed);
+            const bool up = matches(Action::MenuScrollUp, code), down_scroll = matches(Action::MenuScrollDown, code);
+            if (up || down_scroll) {
+                HighlightedSlot(&selector);
+                std::lock_guard lock(mouse_mutex);
+                menu_target.active = false;
+                const bool horizontal = code == bindings::WheelLeft || code == bindings::WheelRight || selector || Down(VK_SHIFT) || Down(VK_LSHIFT) || Down(VK_RSHIFT);
+                if (up) dpad_steps.Push(horizontal ? 0x04u : 0x01u);
+                if (down_scroll) dpad_steps.Push(horizontal ? 0x08u : 0x02u);
+            }
+        } else {
+            const int steps = int(matches(Action::ZoomOut, code)) - int(matches(Action::ZoomIn, code));
+            if (steps && StepCameraDistance(steps)) NoteSettingChanged();
         }
+    };
+    if (message == WM_KEYDOWN || message == WM_KEYUP || message == WM_SYSKEYDOWN || message == WM_SYSKEYUP) {
+        const auto code = bindings::KeyInput(uint32_t(wp), lp);
+        if (code) press(code, message == WM_KEYDOWN || message == WM_SYSKEYDOWN);
         return false;
+    }
+    switch (message) {
+        case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK: press(VK_LBUTTON, true); break;
+        case WM_LBUTTONUP: press(VK_LBUTTON, false); break;
+        case WM_RBUTTONDOWN: case WM_RBUTTONDBLCLK: press(VK_RBUTTON, true); break;
+        case WM_RBUTTONUP: press(VK_RBUTTON, false); break;
+        case WM_MBUTTONDOWN: case WM_MBUTTONDBLCLK: press(VK_MBUTTON, true); break;
+        case WM_MBUTTONUP: press(VK_MBUTTON, false); break;
+        case WM_XBUTTONDOWN: case WM_XBUTTONDBLCLK: press(HIWORD(wp) == XBUTTON1 ? VK_XBUTTON1 : VK_XBUTTON2, true); break;
+        case WM_XBUTTONUP: press(HIWORD(wp) == XBUTTON1 ? VK_XBUTTON1 : VK_XBUTTON2, false); break;
     }
 
     if (message == WM_INPUT) {
@@ -570,21 +613,11 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         }
         RAWINPUT raw{};
         UINT size = sizeof(raw);
-        if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lp), RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) != (UINT)-1) {
-            if (raw.header.dwType == RIM_TYPEMOUSE) {
-                int dx = 0, dy = 0;
-                if ((raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
-                    dx = raw.data.mouse.lLastX;
-                    dy = raw.data.mouse.lLastY;
-                }
-                if (dx != 0 || dy != 0) {
-                    std::lock_guard lock(mouse_mutex);
-                    look_dx += static_cast<float>(dx);
-                    look_dy += static_cast<float>(dy);
-                    last_look_time = Clock::now();
-                    has_raw_delta = true;
-                }
-            }
+        const UINT bytes = GetRawInputData(reinterpret_cast<HRAWINPUT>(lp), RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER));
+        if (bytes != (UINT)-1 && bytes >= sizeof(RAWINPUTHEADER) + sizeof(RAWMOUSE) &&
+            raw.header.dwType == RIM_TYPEMOUSE && (raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
+            std::lock_guard lock(mouse_mutex);
+            mouse_look.AddRaw(raw.data.mouse.lLastX, raw.data.mouse.lLastY);
         }
         return false;
     }
@@ -605,66 +638,33 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
             std::lock_guard lock(mouse_mutex);
             // In menus, the click selects the slot under the cursor; off every slot it does nothing, and where the
             // highlight cannot be read (a dialog) it is the A button
-            if (in_menu) {
+            pointer_confirm_pending = false;
+            if (in_menu && matches(Action::MenuConfirm, VK_LBUTTON)) {
                 if (gamepad_detected.load(std::memory_order_relaxed)) break;
                 if (HighlightedSlot()) {
                     if (auto slot = SlotAt(GET_X_LPARAM(lp), GET_Y_LPARAM(lp), client_w, client_h)) SetMenuTarget(*slot, true);
+                    pointer_confirm_pending = true;
                     break;
                 }
             }
-            mouse_left.Press();
+
             break;
         }
-        case WM_LBUTTONUP: {
-            if (in_menu && gamepad_detected.load(std::memory_order_relaxed)) break;
-            std::lock_guard lock(mouse_mutex);
-            mouse_left.Release();
-            break;
-        }
-        case WM_RBUTTONDOWN:
-        case WM_RBUTTONDBLCLK: {
-            if (in_menu && gamepad_detected.load(std::memory_order_relaxed)) break;
-            std::lock_guard lock(mouse_mutex);
-            mouse_right.Press();
-            break;
-        }
-        case WM_RBUTTONUP: {
-            if (in_menu && gamepad_detected.load(std::memory_order_relaxed)) break;
-            std::lock_guard lock(mouse_mutex);
-            mouse_right.Release();
-            break;
-        }
-        case WM_MOUSEWHEEL: {
-            if (!in_menu || gamepad_detected.load(std::memory_order_relaxed)) break;
-            std::lock_guard lock(mouse_mutex);
-            menu_target.active = false;
-            wheel_v_accum += GET_WHEEL_DELTA_WPARAM(wp);
-            // over a selector the wheel changes its choice
-            bool selector = false;
-            const bool over_selector = HighlightedSlot(&selector) && selector;
-            const bool horizontal = over_selector || (GET_KEYSTATE_WPARAM(wp) & MK_SHIFT) != 0 || Down(VK_SHIFT);
-            while (wheel_v_accum >= WHEEL_DELTA) {
-                wheel_v_accum -= WHEEL_DELTA;
-                dpad_steps.Push(horizontal ? 0x04u : 0x01u);  // Left or Up
-            }
-            while (wheel_v_accum <= -WHEEL_DELTA) {
-                wheel_v_accum += WHEEL_DELTA;
-                dpad_steps.Push(horizontal ? 0x08u : 0x02u);  // Right or Down
-            }
-            break;
-        }
+        case WM_MOUSEWHEEL:
         case WM_MOUSEHWHEEL: {
-            if (!in_menu || gamepad_detected.load(std::memory_order_relaxed)) break;
-            std::lock_guard lock(mouse_mutex);
-            wheel_h_accum += GET_WHEEL_DELTA_WPARAM(wp);
-            while (wheel_h_accum >= WHEEL_DELTA) {
-                wheel_h_accum -= WHEEL_DELTA;
-                dpad_steps.Push(0x08u);  // Right
+            if (in_menu && gamepad_detected.load(std::memory_order_relaxed)) break;
+            int steps = 0;
+            {
+                std::lock_guard lock(mouse_mutex);
+                int& accum = message == WM_MOUSEWHEEL ? wheel_v_accum : wheel_h_accum;
+                accum += GET_WHEEL_DELTA_WPARAM(wp);
+                steps = accum / WHEEL_DELTA;
+                accum %= WHEEL_DELTA;
             }
-            while (wheel_h_accum <= -WHEEL_DELTA) {
-                wheel_h_accum += WHEEL_DELTA;
-                dpad_steps.Push(0x04u);  // Left
-            }
+            const auto positive = message == WM_MOUSEWHEEL ? bindings::WheelUp : bindings::WheelRight;
+            const auto negative = message == WM_MOUSEWHEEL ? bindings::WheelDown : bindings::WheelLeft;
+            const auto code = steps > 0 ? positive : negative;
+            for (int i = 0; i < std::abs(steps); ++i) { press(code, true); press(code, false); }
             break;
         }
         case WM_MOUSEMOVE: {
@@ -701,11 +701,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
                     }
                 }
             } else if (window_focused.load(std::memory_order_relaxed)) {
-                if (!has_raw_delta) {
-                    look_dx += static_cast<float>(dx);
-                    look_dy += static_cast<float>(dy);
-                    last_look_time = Clock::now();
-                }
+                mouse_look.AddFallback(dx, dy);
                 POINT center{};
                 if (CenterCursorInWindow(hwnd, center)) {
                     last_cursor_x = center.x;
@@ -726,6 +722,20 @@ void KeyboardPad(int port, input::Pad& pad) {
     SetGamepadDetected(physical_connected);
     pad.connected = true;
 
+    const bool controls_open = ControlsCapturing();
+    if (controls_were_open.exchange(controls_open) != controls_open) {
+        Clear();
+        if (HWND hwnd = game_hwnd.load(std::memory_order_relaxed); hwnd && IsWindow(hwnd))
+            PostMessageW(hwnd, kSyncCursorMsg, IsInMenuState() ? 1 : 0, 0);
+        else ApplyCursorVisibilityOnWindowThread(nullptr, IsInMenuState());
+    }
+    if (controls_open) {
+        Clear();
+        pad = {};
+        pad.connected = true;
+        return;
+    }
+
     const bool in_menu = IsInMenuState();
     const int menu_flag = in_menu ? 1 : 0;
     if (last_polled_menu_state.exchange(menu_flag, std::memory_order_relaxed) != menu_flag) {
@@ -734,50 +744,21 @@ void KeyboardPad(int port, input::Pad& pad) {
         }
     }
 
-    // Keyboard controls:
-    // D-pad: Arrow keys (Up / Down / Left / Right)
-    // Start (Menu / Pause): Esc
-    // Back (Map / Objectives): Tab
-    // Left Stick Click (Reset Camera): C
-    // Right Stick Click (Taunt): V
-    if (Down(VK_UP)) pad.buttons |= 0x01u;
-    if (Down(VK_DOWN)) pad.buttons |= 0x02u;
-    if (Down(VK_LEFT)) pad.buttons |= 0x04u;
-    if (Down(VK_RIGHT)) pad.buttons |= 0x08u;
-    if (Down(VK_ESCAPE)) pad.buttons |= 0x10u;
-    if (Down(VK_TAB)) pad.buttons |= 0x20u;
-    if (Down('C')) pad.buttons |= 0x40u;
-    if (Down('V')) pad.buttons |= 0x80u;
-
-    // Analog buttons (0-255):
-    // [0] A (Jump / Charge Jump / Select): Space / Enter
-    // [1] B (Grab / Pick Up / Throw / Back): Q
-    // [2] X (Punch / Attack): Left Click (in gameplay)
-    // [3] Y (Critical Mass / Ground Slam / Special): E
-    // [4] Black (Smash Camera): 2
-    // [5] White (Cycle Target): 1
-    // [6] Left Trigger (Target Lock-On / Guard): Right Click (in gameplay)
-    // [7] Right Trigger (Sprint / Wall Run / Dodge): Left Shift
-    if (Down(VK_SPACE) || (Down(VK_RETURN) && (!in_menu || !enter_on_selector.load(std::memory_order_relaxed))))
-        pad.analog[0] = 255;
-    if (Down('Q')) pad.analog[1] = 255;
-    if (Down('E')) pad.analog[3] = 255;
-    if (Down('2')) pad.analog[4] = 255;
-    if (Down('1')) pad.analog[5] = 255;
-    if (Down(VK_SHIFT)) pad.analog[7] = 255;
-
-    // Left stick movement: WASD
-    auto axis = [](unsigned positive, unsigned negative) -> int16_t {
-        return int16_t((int(Down(positive)) - int(Down(negative))) * 32767);
-    };
-    if (auto x = axis('D', 'A')) pad.lx = x;
-    if (auto y = axis('W', 'S')) pad.ly = y;
-
     {
         std::lock_guard lock(mouse_mutex);
         const auto now = Clock::now();
         const bool left_pressed = mouse_left.Sample(now);
         const bool right_pressed = mouse_right.Sample(now);
+        const auto map = bindings::Get();
+        bindings::InputState state{};
+        for (size_t i = 0; i < state.size(); ++i)
+            state[i] = keys[i].load(std::memory_order_relaxed) || binding_latches[i].Sample(now);
+        if (in_menu) {
+            if (pointer_confirm_pending) state[VK_LBUTTON] = false;
+            if (gamepad_detected.load(std::memory_order_relaxed))
+                for (const auto code : {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2}) state[code] = false;
+        }
+        ApplyInputBindings(*map, state, in_menu, enter_on_selector.load(std::memory_order_relaxed), pad);
 
         if (in_menu) {
             // Enter advances a highlighted selector; ordinary rows/dialogs still receive A.
@@ -792,42 +773,23 @@ void KeyboardPad(int port, input::Pad& pad) {
                 StepTowardTarget(now);
                 if (left_pressed || mouse_left.Sample(now)) pad.analog[0] = 255;
                 if (right_pressed || mouse_right.Sample(now)) pad.analog[1] = 255;
-                if (Down(VK_DELETE)) pad.analog[2] = 255;
                 pad.buttons |= dpad_steps.Sample(now);
             }
-            look_dx = 0.0f;
-            look_dy = 0.0f;
-            has_raw_delta = false;
+            mouse_look.Reset();
         } else {
             enter_steps.Reset();
             // In gameplay:
             // Left Click = Button X (Punch)
             // Right Click = Left Trigger (Lock-On / Guard)
             // Mouse Move = Camera Look (Right Analog Stick)
-            if (left_pressed) pad.analog[2] = 255;
-            if (right_pressed) pad.analog[6] = 255;
 
-            if (now - last_look_time > std::chrono::milliseconds(50)) {
-                look_dx = 0.0f;
-                look_dy = 0.0f;
-                has_raw_delta = false;
+            if (!window_focused.load(std::memory_order_relaxed)) {
+                mouse_look.Reset();
             } else {
-                float dy = look_dy;
-                if (mouse_invert_y.load(std::memory_order_relaxed)) {
-                    dy = -dy;
-                }
-                if (int16_t rx = StickFromLookDelta(look_dx)) pad.rx = rx;
-                if (int16_t ry = StickFromLookDelta(-dy)) pad.ry = ry;
-
-                if (mouse_smoothing.load(std::memory_order_relaxed)) {
-                    look_dx *= 0.20f;
-                    look_dy *= 0.20f;
-                    if (std::abs(look_dx) < 0.25f) look_dx = 0.0f;
-                    if (std::abs(look_dy) < 0.25f) look_dy = 0.0f;
-                } else {
-                    look_dx = 0.0f;
-                    look_dy = 0.0f;
-                }
+                const MouseStick look = mouse_look.Poll(std::chrono::duration<double>(now.time_since_epoch()).count(),
+                    GetMouseSensitivityX(), GetMouseSensitivityY(), GetMouseInvertY(), GetMouseSmoothing());
+                if (look.x) pad.rx = look.x;
+                if (look.y) pad.ry = look.y;
             }
         }
     }

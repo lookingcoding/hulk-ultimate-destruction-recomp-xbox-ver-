@@ -3,6 +3,16 @@ param(
     [int]$Jobs = 4,
     [string]$Llvm = 'D:\Projects\Build Cache\Tools\clang+llvm-23.1.4-x86_64-pc-windows-msvc\bin'
 )
+$env:TEMP = 'D:\Projects\Build Cache\Temp'
+$env:TMP = $env:TEMP
+$env:CCACHE_DIR = 'D:\Projects\Build Cache\ccache'
+$env:PIP_CACHE_DIR = 'D:\Projects\Build Cache\pip'
+$env:npm_config_cache = 'D:\Projects\Build Cache\npm'
+$env:VCPKG_DEFAULT_BINARY_CACHE = 'D:\Projects\Build Cache\vcpkg\archives'
+$env:VCPKG_DOWNLOADS = 'D:\Projects\Build Cache\vcpkg\downloads'
+$env:XDG_CACHE_HOME = 'D:\Projects\Build Cache\xdg'
+$env:CLANG_MODULE_CACHE_PATH = 'D:\Projects\Build Cache\clang-modules'
+New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
 $ErrorActionPreference = 'Stop'
 function Invoke-BuildTool([string]$File, [string[]]$Arguments) {
     # Windows PowerShell otherwise treats native stderr warnings as terminating errors when redirected.
@@ -45,11 +55,14 @@ $env:TEMP = $build
 $env:TMP = $build
 Push-Location $project
 try {
-    # The final present-counter patch overlaps the renderer patch. Unapply it before
-    # checking earlier patches, then the normal loop reapplies it in order.
-    $presentPatch = Join-Path $project 'patches/zzzzzzz-present-counter.patch'
-    if (Test-AppliedPatch $presentPatch) {
-        Invoke-BuildTool git @('-C','sdk','apply','--reverse',$presentPatch)
+    # Later patches share context with earlier ones. Remove those layers in
+    # reverse order before testing/reapplying the complete ordered patch queue.
+    foreach ($name in @('zzzzzzzzz-background-errors.patch','zzzzzzzz-background-silence.patch',
+                        'zzzzzzz-internal-pad-test.patch','zzzzzzz-present-counter.patch')) {
+        $layer = Join-Path $project "patches/$name"
+        if (Test-AppliedPatch $layer) {
+            Invoke-BuildTool git @('-C','sdk','apply','--reverse',$layer)
+        }
     }
     foreach ($patchFile in Get-ChildItem (Join-Path $project 'patches') -Filter '*.patch' -File) {
         $patch = $patchFile.FullName
@@ -60,7 +73,7 @@ try {
     }
     Invoke-BuildTool cmake @('--preset','release')
     if ($Stage -eq 'Configure') { return }
-    Invoke-BuildTool cmake @('--build',$build,'--target','xbe_symbols','xbe_recomp','hulk_disasm','hulk_simulation_tests','hulk_analysis_tests','hulk_input_tests','hulk_kernel_io_tests','hulk_display_menu_tests','hulk_cheat_tests','--parallel',"$Jobs")
+    Invoke-BuildTool cmake @('--build',$build,'--target','xbe_symbols','xbe_recomp','hulk_disasm','hulk_simulation_tests','hulk_analysis_tests','hulk_input_tests','hulk_kernel_io_tests','hulk_display_menu_tests','hulk_cheat_tests','hulk_input_usa_tests','hulk_mouse_tests','hulk_bindings_tests','hulk_controls_tests','hulk_controls_usa_tests','hulk_native_screen_tests','--parallel',"$Jobs")
     Invoke-BuildTool ctest @('--test-dir',$build,'--output-on-failure')
     if ($Stage -eq 'Tools') { return }
     if (!(Test-Path -LiteralPath 'config\game.toml') -or !(Select-String -LiteralPath 'config\game.toml' -Pattern '^\[symbols\]' -Quiet)) {

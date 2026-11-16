@@ -1,4 +1,5 @@
 #include "common/settings_ui.h"
+#include "common/bindings.h"
 #include <algorithm>
 #include <string>
 #ifndef WIN32_LEAN_AND_MEAN
@@ -26,6 +27,7 @@ std::string g_renderer = "auto";
 void LoadCustomSettings(const void* table_ptr) {
     if (!table_ptr) return;
     const auto& t = *static_cast<const toml::table*>(table_ptr);
+    bindings::Load(table_ptr);
     // Options -> Cheats (cheats.h): a toggle as a bool, a cheat with more levels as its level; missing is off
     for (size_t i = 0; i < cheats::kCheatCount; i++) {
         const cheats::CheatInfo& info = cheats::Info(cheats::Cheat(i));
@@ -37,6 +39,9 @@ void LoadCustomSettings(const void* table_ptr) {
     if (auto v = t["mouse_sensitivity"].value<double>()) {
         SetMouseSensitivity(static_cast<float>(*v));
     }
+    // Legacy scalar migrates to both axes; explicit axis values always win.
+    if (auto v = t["mouse_sensitivity_x"].value<double>()) SetMouseSensitivityX(static_cast<float>(*v));
+    if (auto v = t["mouse_sensitivity_y"].value<double>()) SetMouseSensitivityY(static_cast<float>(*v));
     if (auto v = t["mouse_invert_y"].value<bool>()) {
         SetMouseInvertY(*v);
     }
@@ -72,7 +77,10 @@ void LoadCustomSettings(const void* table_ptr) {
 void SaveCustomSettings(void* table_ptr) {
     if (!table_ptr) return;
     auto& t = *static_cast<toml::table*>(table_ptr);
+    bindings::Save(table_ptr);
     t.insert_or_assign("mouse_sensitivity", GetMouseSensitivity());
+    t.insert_or_assign("mouse_sensitivity_x", GetMouseSensitivityX());
+    t.insert_or_assign("mouse_sensitivity_y", GetMouseSensitivityY());
     t.insert_or_assign("mouse_invert_y", GetMouseInvertY());
     t.insert_or_assign("mouse_smoothing", GetMouseSmoothing());
     t.insert_or_assign("camera_invert_x", GetCameraInvertX());  // Camera Options, as the player set them (camera.h)

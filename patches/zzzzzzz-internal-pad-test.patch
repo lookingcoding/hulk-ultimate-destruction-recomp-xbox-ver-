@@ -1,0 +1,86 @@
+diff --git a/runtime/app/app.h b/runtime/app/app.h
+--- a/runtime/app/app.h
++++ b/runtime/app/app.h
+@@ -87,6 +87,7 @@
+     uint32_t* value;
+ };
+ struct GameInfo {
++    bool (*background_test)() = nullptr;  // opted-in hidden internal-pad fixture; default is normal gameplay
+     const wchar_t* title;        // window and splash
+     const wchar_t* short_title;  // message boxes
+     const wchar_t* name;         // window classes, crash dumps, handover event
+diff --git a/runtime/app/main.cpp b/runtime/app/main.cpp
+--- a/runtime/app/main.cpp
++++ b/runtime/app/main.cpp
+@@ -33,6 +33,7 @@
+ namespace {
+ 
+ HWND g_hwnd = nullptr;
++bool g_background_test = false;
+ constexpr UINT kApplyDisplay = WM_APP + 1, kOpenWindow = WM_APP + 2;
+ bool g_mode_changed = false;
+ bool g_apply_posted = false;  // a display apply is waiting in the queue or running
+@@ -199,12 +200,14 @@
+             }
+             break;
+         case kApplyDisplay:
++            if (g_background_test) return 0;
+             if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+             ApplyNow();
+             g_apply_posted = false;
+             return 0;
+         case kOpenWindow:
+             CloseSplash();
++            if (g_background_test) return 0;
+             if (wp) ApplyNow();
+             ShowWindow(hwnd, SW_SHOW);
+             SetForegroundWindow(hwnd);
+@@ -304,6 +307,7 @@
+     logx::Init((app::ExeDir() / "logs").string(), log, relaunched);
+     app::Load();
+     if (app::kGame.init) app::kGame.init();
++    app::g_background_test = app::kGame.background_test && app::kGame.background_test();
+     if (relaunched && !logx::kVerbose) LOGR("Relaunched: %s", IMAGE_XBE);
+     else app::LogSystem();
+ 
+@@ -311,7 +315,8 @@
+     if (!app::FindGame(game)) return 1;
+     if (!app::PrepareGameCode(game)) return 1;
+ 
+-    bool splash = app::OpenSplash(), handover = app::StartHandover();
++    bool splash = !app::g_background_test && app::OpenSplash();
++    bool handover = !app::g_background_test && app::StartHandover();
+ 
+     WNDCLASSEXW wc{sizeof(wc)};
+     wc.style = CS_HREDRAW | CS_VREDRAW;
+@@ -329,16 +334,18 @@
+     // behind a splash the window stays hidden until the game's first frame; handed over, it is set up hidden
+     if (handover) {
+         app::ApplyNow();
+-    } else if (!splash) {
++    } else if (!splash && !app::g_background_test) {
+         app::ApplyNow();
+         ShowWindow(app::g_hwnd, SW_SHOW);
+     }
++    if (app::g_background_test) LOGR("test fixture: render window remains hidden; no display-mode apply, show or focus request");
+ 
+     IMGUI_CHECKVERSION();
+     ImGui::CreateContext();
+     ImGuiIO& io = ImGui::GetIO();
+     io.IniFilename = nullptr;
+     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
++    if (app::g_background_test) io.ConfigFlags = ImGuiConfigFlags_NoMouse | ImGuiConfigFlags_NoMouseCursorChange;
+     ImGui_ImplWin32_Init(app::g_hwnd);
+ 
+     input::Init();
+diff --git a/runtime/core/input.cpp b/runtime/core/input.cpp
+--- a/runtime/core/input.cpp
++++ b/runtime/core/input.cpp
+@@ -128,6 +128,7 @@
+ 
+ // the motors run until set again
+ void Rumble(int port, uint16_t left, uint16_t right) {
++    if (app::kGame.background_test && app::kGame.background_test()) return;
+     if (app::kGame.rumble) app::kGame.rumble(port, left, right);
+     std::lock_guard lock(g_lock);
+     if (port >= 0 && port < 4 && g_pads[port]) SDL_RumbleGamepad(g_pads[port], left, right, 0);

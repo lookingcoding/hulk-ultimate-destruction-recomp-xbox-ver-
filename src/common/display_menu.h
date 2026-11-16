@@ -45,4 +45,5 @@ void TickDisplaySettings();
 // a setting changed outside the menu (the mouse wheel's camera distance): saved once it settles
 void NoteSettingChanged();
 
+
 }  // namespace hulk

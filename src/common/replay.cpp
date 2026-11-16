@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include "common/replay.h"
+#include "common/native_controls.h"
 #include "core/input.h"
 #include "core/log.h"
 #include "gpu/backend.h"
@@ -43,6 +44,8 @@ static void LoadReplay(long elapsed) {
         std::istringstream names(event.buttons);
         std::string name;
         while (std::getline(names, name, '+')) {
+            if (hulk::BackgroundTest() && name.starts_with("BIND:") && hulk::bindings::ParseInput(name.substr(5))) continue;
+            if (hulk::BackgroundTest() && name.starts_with("CONTROL:") && name.size() > 8) continue;
             if (name != "START" && name != "BACK" && name != "A" && name != "B" && name != "X" && name != "Y" &&
                 name != "UP" && name != "DOWN" && name != "LEFT" && name != "RIGHT" &&
                 name != "LUP" && name != "LDOWN" && name != "LLEFT" && name != "LRIGHT" &&
@@ -77,6 +80,10 @@ void hulk::InitReplay() {
 void hulk::ReplayPad(int port, input::Pad& pad) {
     if (port || replayPath.empty()) return;
     std::lock_guard lock(replayMutex);
+    if (BackgroundTest()) {
+        static bool reported = false;
+        if (!reported) { reported = true; LOGR("test fixture: internal pad callback active"); }
+    }
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
     if (Clock::now() >= nextCheck) {
         nextCheck = Clock::now() + std::chrono::milliseconds(250);
@@ -87,12 +94,21 @@ void hulk::ReplayPad(int port, input::Pad& pad) {
     for (auto& event : events) {
         if (elapsed < event.at || elapsed >= event.at + event.duration) continue;
         const bool first = !event.announced;
-        if (first) LOGI("test input: %ld ms %s", event.at, event.buttons.c_str());
+        if (first) {
+            LOGI("test input: %ld ms %s", event.at, event.buttons.c_str());
+            if (BackgroundTest()) logx::Flush();
+        }
         event.announced = true;
         std::istringstream names(event.buttons);
         std::string name;
         while (std::getline(names, name, '+')) {
-            if (name == "START") pad.buttons |= 0x10;
+            if (first && BackgroundTest() && name.starts_with("BIND:")) {
+                if (auto key = bindings::ParseInput(name.substr(5))) CaptureControlsInput(*key);
+            }
+            else if (first && BackgroundTest() && name.starts_with("CONTROL:")) {
+                try { RequestControlsFixture(unsigned(std::stoul(name.substr(8)))); } catch (...) {}
+            }
+            else if (name == "START") pad.buttons |= 0x10;
             else if (name == "BACK") pad.buttons |= 0x20;
             else if (name == "UP") pad.buttons |= 1;
             else if (name == "DOWN") pad.buttons |= 2;
@@ -120,4 +136,13 @@ void hulk::ReplayPad(int port, input::Pad& pad) {
         }
         pad.connected = true;
     }
+}
+
+// Opt-in verification only. Normal gameplay retains normal window/audio/input behavior.
+bool hulk::BackgroundTest() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("HULK_BACKGROUND_TEST");
+        return value && std::string(value) == "1";
+    }();
+    return enabled;
 }

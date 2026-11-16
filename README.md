@@ -20,11 +20,11 @@ The game checks your disc image when it starts and tells you if it can't use it.
 
 ## Features & Improvements
 
-- **Native PC Mouse Look & Camera Overhaul:**
-  - True 1:1 raw mouse sensor input via Windows Raw Input (`WM_INPUT`).
-  - Instantaneous camera stop when mouse stops (no floaty lag or artificial deceleration).
-  - Continuous dynamic deadzone blending for pixel-precise micro-aiming without abrupt stick jumps.
-  - Full sensitivity slider and vertical look inversion (Invert Y).
+- **Mouse camera controls:**
+  - Windows Raw Input (`WM_INPUT`), with cursor-delta fallback when raw input is unavailable.
+  - Mouse input accounts for elapsed time and the camera deadzone. Extra input polls do not repeat movement; motion above the stick limit is carried forward.
+  - Independent X/Y sensitivity sliders and vertical inversion in **Options > Controls / Keybinds**.
+  - The game's native camera still limits turning speed and acceleration. The camera may keep moving briefly after a fast swipe.
 - **Direct Mouse Hit-Testing & Menu Navigation:**
   - Hovering a menu row or tab highlights it and clicking selects it. The port reads the game's real highlighted row and steps the D-pad until it matches the one under the pointer, so greyed-out rows, wrapping and every list length work.
   - Clicking a tab (Options / Story Mode / Extras) from inside a list goes back and opens that tab. Clicking or scrolling on a selector changes its value.
@@ -61,7 +61,37 @@ The game checks your disc image when it starts and tells you if it can't use it.
 
 ## PC Controls
 
-Keyboard and mouse input is mapped to player 1 alongside any connected Xbox/PlayStation controller:
+Open **Options > Controls / Keybinds** from the main menu or pause menu. The parent page contains **Keybinds**, **Invert mouse Y**, separate **Mouse sensitivity X/Y** sliders and **Reset mouse defaults**. It uses the game's own fonts, background, selection bars and navigation, like Display Options.
+
+Open **Keybinds** to change keyboard and mouse bindings. Each row shows **Primary | Alternate**; use **Actions** to browse all 28 actions, seven per page. Select a row, choose **Primary** or **Alternate**, then press a key, mouse button, or wheel direction. Escape/controller B cancels capture. **More...** offers **Add** (additional inputs) and **Unbind** (clear the row). Extra inputs appear as `(+N)`; More shows the full list. Conflicts offer **Replace**, **Keep both**, and **Cancel** in the game's native popup. Binding changes save immediately.
+
+**Reset keybinds to defaults** asks for confirmation and resets bindings. The parent's **Reset mouse defaults** separately restores both sensitivities and mouse inversion. Sliders apply immediately and save after settling. Back returns to Controls.
+
+Sensitivity multipliers range from 0.1 to 5.0, with both axes defaulting to 1.0. These keys go at the top level of `game/settings.toml`, before `[bindings]` (source builds use `settings.toml` beside the game executable):
+
+```toml
+mouse_sensitivity_x = 1.0
+mouse_sensitivity_y = 1.0
+mouse_invert_y = false
+mouse_smoothing = false
+```
+
+The older `mouse_sensitivity` value initializes both axes; explicit X/Y values override it. Existing game tooltips and mission hints continue to show the default keys.
+
+Bindings are stored in the `[bindings]` table of `game/settings.toml`. Each action accepts a name or an array of names. `[]` or `"unbound"` disables an action. Missing or invalid entries use that action's defaults; an invalid array falls back as a whole. Names are case-insensitive, including letters, digits, F1-F24, arrows, Space, Enter, Escape, Tab, Delete, Shift/Ctrl/Alt and their Left/Right variants, Num0-Num9, MouseLeft/MouseRight/MouseMiddle/MouseX1/MouseX2, and WheelUp/Down/Left/Right.
+
+```toml
+[bindings]
+move_up = ["W", "Up"]
+attack = ["MouseLeft", "K"]
+menu_select = ["Enter"]
+zoom_in = ["WheelUp"]
+taunt = [] # unbound
+```
+
+`menu_select` selects ordinary menu rows and advances selectors once per press. It is separate from gameplay `jump` (Space/Enter) and menu `menu_confirm` (Space/left click), matching the existing defaults. Controller bindings are unchanged.
+
+Keyboard and mouse input is mapped to player 1 alongside any connected Xbox/PlayStation controller. These are the defaults:
 
 | PC Control | Action | Xbox Controller Equivalent |
 | :--- | :--- | :--- |

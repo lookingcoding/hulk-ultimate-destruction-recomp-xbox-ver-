@@ -19,6 +19,7 @@ inline constexpr uint32_t kSharedHandler = 0x000BBD10;        // AudioQualityCha
 inline constexpr uint32_t kSyncHandler = 0x000B45E0;          // Print
 inline constexpr uint32_t kWidgetType = 0x0049DBA4;           // FEObject type descriptor
 inline constexpr uint32_t kTextSelectorType = 0x0049DBBC;     // TextSelector type descriptor
+inline constexpr uint32_t kHSliderVtable = 0x0040C48C;
 inline constexpr uint32_t kTextSelectorVtable = 0x0040C4E4;
 inline constexpr uint32_t kFrontend = 0x004E0A60;             // the FE manager
 inline constexpr uint32_t kApp = 0x004DD700;                  // the app, its flow manager at +0x54
@@ -27,6 +28,12 @@ inline constexpr uint32_t kFiberTlsIndex = 0x004E5A9C;
 inline constexpr uint32_t kSwitchToFiber = 0x0035551D, kDeleteFiber = 0x0035550A, kFiberBootstrap = 0x00355439;
 inline constexpr uint32_t kHintBegin = 0x000CE700;            // hud_triggerButtonHintBegin
 #define HULK_SUB_FE_CALLBACKS sub_000C43A0  // the frontend's callbacks object
+#define HULK_SUB_FE_SCREEN_CREATE sub_000E6620
+#define HULK_SUB_FE_SCREEN_FIND sub_000E6BE0
+#define HULK_SUB_FE_SCREEN_FIND_ALT sub_000E6490
+#define HULK_SUB_FE_CLEAR sub_000EFAF0
+#define HULK_SUB_FE_DESTROY sub_000DDFC0
+#define HULK_SUB_FE_INITIALISE sub_000E8310
 // cheats (game/cheat_stats.cpp): IsUnlockableOn's gameplay call sites by return address, the damage a character takes,
 // its health setter (thiscall value, force) and the world clock's scale setter (thiscall float)
 #define HULK_SUB_IS_UNLOCKABLE_ON sub_00092940
@@ -71,6 +78,7 @@ inline constexpr uint32_t kSharedHandler = 0x000BBEC0;
 inline constexpr uint32_t kSyncHandler = 0x000B46B0;
 inline constexpr uint32_t kWidgetType = 0x0049FCE4;
 inline constexpr uint32_t kTextSelectorType = 0x0049FCFC;
+inline constexpr uint32_t kHSliderVtable = 0x0040CF54;
 inline constexpr uint32_t kTextSelectorVtable = 0x0040CFAC;
 inline constexpr uint32_t kFrontend = 0x004E2BA0;
 inline constexpr uint32_t kApp = 0x004DF840;
@@ -79,6 +87,12 @@ inline constexpr uint32_t kFiberTlsIndex = 0x004E7BDC;
 inline constexpr uint32_t kSwitchToFiber = 0x00350EBD, kDeleteFiber = 0x00350EAA, kFiberBootstrap = 0x00350DD9;
 inline constexpr uint32_t kHintBegin = 0x000CE870;            // hud_triggerButtonHintBegin
 #define HULK_SUB_FE_CALLBACKS sub_000C4500
+#define HULK_SUB_FE_SCREEN_CREATE sub_000E6840
+#define HULK_SUB_FE_SCREEN_FIND sub_000E6E00
+#define HULK_SUB_FE_SCREEN_FIND_ALT sub_000E66B0
+#define HULK_SUB_FE_CLEAR sub_000EFD10
+#define HULK_SUB_FE_DESTROY sub_000DE1E0
+#define HULK_SUB_FE_INITIALISE sub_000E8530
 #define HULK_SUB_IS_UNLOCKABLE_ON sub_000929E0
 #define HULK_SUB_APPLY_DAMAGE sub_00043330
 inline constexpr uint32_t kRetInvulnerability = 0x000434DF, kRetDoubleDamage = 0x00043491;

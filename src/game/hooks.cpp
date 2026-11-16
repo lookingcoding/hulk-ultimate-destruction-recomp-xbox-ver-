@@ -14,6 +14,8 @@
 #include "common/camera.h"
 #include "common/cheats.h"
 #include "common/display_menu.h"
+#include "common/native_controls.h"
+#include "common/native_screen.h"
 #include "common/language.h"
 #include "common/simulation.h"
 #include "common/view.h"
@@ -28,6 +30,36 @@ X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_CALLBACKS));
 X86_FUNC(HULK_SUB_FE_CALLBACKS) {
     HULK_IMP(HULK_SUB_FE_CALLBACKS)(ctx, base);
     hulk::RegisterDisplayCallbacks(ctx);
+}
+
+// The dedicated Keybinds page is a native FEMenu, beyond the retail 64-slot cache.
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_SCREEN_CREATE));
+X86_FUNC(HULK_SUB_FE_SCREEN_CREATE) {
+    if (!hulk::ExtraNativeScreen(ctx, true)) HULK_IMP(HULK_SUB_FE_SCREEN_CREATE)(ctx, base);
+}
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_SCREEN_FIND));
+X86_FUNC(HULK_SUB_FE_SCREEN_FIND) {
+    if (!hulk::ExtraNativeScreen(ctx, false)) HULK_IMP(HULK_SUB_FE_SCREEN_FIND)(ctx, base);
+}
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_SCREEN_FIND_ALT));
+X86_FUNC(HULK_SUB_FE_SCREEN_FIND_ALT) {
+    if (!hulk::ExtraNativeScreen(ctx, false)) HULK_IMP(HULK_SUB_FE_SCREEN_FIND_ALT)(ctx, base);
+}
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_CLEAR));
+X86_FUNC(HULK_SUB_FE_CLEAR) {
+    hulk::ReleaseExtraNativeScreen(ctx);
+    HULK_IMP(HULK_SUB_FE_CLEAR)(ctx, base);
+}
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_DESTROY));
+X86_FUNC(HULK_SUB_FE_DESTROY) {
+    hulk::ReleaseExtraNativeScreen(ctx);
+    HULK_IMP(HULK_SUB_FE_DESTROY)(ctx, base);
+}
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_INITIALISE));
+X86_FUNC(HULK_SUB_FE_INITIALISE) {
+    const uint32_t manager = ctx.ecx;
+    HULK_IMP(HULK_SUB_FE_INITIALISE)(ctx, base);
+    hulk::InitialiseExtraNativeScreen(ctx, manager);
 }
 
 // AudioQualityChanged (thiscall, int; ret 4): only PS2 and GameCube scripts name it, the display options' selectors
@@ -133,6 +165,7 @@ X86_FUNC(HULK_SUB_FRAME_SWAP) {
     hulk::g_frame_swaps.fetch_add(1, std::memory_order_relaxed);
     X86_MEM32(hulk::addr::kFrameSwapVBlanks) = kBlanksPassed;
     X86_MEM8(hulk::addr::kFrameSwapOneVBlank) = 0;
+    hulk::TickNativeControls(ctx);
     HULK_IMP(HULK_SUB_FRAME_SWAP)(ctx, base);
 }
 

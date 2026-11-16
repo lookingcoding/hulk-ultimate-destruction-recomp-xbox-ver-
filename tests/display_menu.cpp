@@ -8,10 +8,12 @@
 #include <vector>
 #include "app/app.h"
 #include "common/display_menu.h"
+#include "common/native_controls.h"
 #include "common/cheats.h"
 #include "common/language.h"
 #include "common/view.h"
 #include "kernel/kernel.h"
+namespace hulk { bool BackgroundTest() { return false; } }
 
 // Serve the real misc.rcf through the display menu's view and read it back as the game's cement library reader does.
 namespace app {
@@ -44,7 +46,7 @@ uint32_t CallGuest(X86Context& ctx, uint32_t fn, const uint32_t* args, size_t co
         next_alloc += (args[0] + 15) & ~15u;
         return p;
     }
-    if ((fn == 0x000FC420 || fn == 0x000FC400) && count == 2) {
+    if ((fn == 0x000FC420 || fn == 0x000FC400 || fn == 0xFC440) && count == 2) {
         registered.push_back({reinterpret_cast<const char*>(g_base + args[0]), {R32(args[1]), R32(args[1] + 4), R32(args[1] + 8)}});
         return 0;
     }
@@ -152,7 +154,7 @@ int main(int argc, char** argv) {
     bool french_cheats = false;
     for (const std::string& t : tables) {
         Check(t.find("TBS_PC_DISPLAY_OPTIONS\t") != std::string::npos, "string tables have the menu's keys");
-        Check(t.find("TBS_PC_CHEAT_INFINITE_RAGE\t") != std::string::npos && t.find("TBS_PC_CHEATS_MOVEMENT\t") != std::string::npos &&
+        Check(t.find("TBS_PC_CHEAT_INFINITE_RAGE\t") != std::string::npos && t.find("TBS_PC_BIND_PAGE\t") != std::string::npos &&
                   t.find("TBS_PC_DAMAGE_ONE_HIT\t") != std::string::npos && t.find("TBS_PC_SCALE_25\t") != std::string::npos,
               "string tables have the cheats' keys");
         french_cheats |= t.find("TBS_PC_CHEAT_INFINITE_RAGE\tRage infinie") != std::string::npos;
@@ -203,7 +205,7 @@ int main(int argc, char** argv) {
         Check(script->find(main ? "AddTextButton \"FEmain_left_item6\"\r\n    {\r\n        text \"TBS_MENU_ITEM_SF_CHEATS\""
                                 : "AddTextButton \"FEpause_text5\"\r\n    {\r\n        text \"TBS_MENU_ITEM_SF_CHEATS\"") != std::string::npos,
               "the Cheats row's slot follows Display Options'");
-        const size_t first = script->find("AddScreen \"pc_cheats\""), second = script->find("AddScreen \"pc_cheats_movement\"");
+        const size_t first = script->find("AddScreen \"pc_cheats\""), second = script->find("AddScreen \"pc_controls\"");
         Check(first != std::string::npos && second != std::string::npos && first < second &&
                   second < script->find("AddScreen \"camera_options\""),
               "both cheat screens are before Camera Options");
@@ -213,7 +215,7 @@ int main(int argc, char** argv) {
         for (size_t at = script->find("\nAddScreen \""); at != std::string::npos; at = script->find("\nAddScreen \"", at + 1))
             screens++;
         if (script->find("AddScreen \"init_progressive_check\"") != std::string::npos) screens--;  // GameCube only
-        Check(screens <= 64, "no more screens than the frontend keeps (64)");
+        Check(screens - 1 <= 64, "native cache has 64 slots plus the owned Keybinds page");
         Check(script->find("AddNamedValueInt \"PCCheatInvulnerability\"") < first, "the cheats' named values come before their screens");
         const std::string page2 = script->substr(second, script->find("AddScreen", second + 1) - second);
         Check(script->find("AddNamedValueInt \"PCCheatDamage\" 2 \"PCCheatDamageChanged\"") != std::string::npos &&
@@ -230,16 +232,16 @@ int main(int argc, char** argv) {
         Check(page1.find("TextSelection \"\" TBS_MENU_ITEM_CHOICE_OFF TBS_MENU_ITEM_CHOICE_ON\r\n        NamedValue \"PCCheatInvulnerability\"") !=
                   std::string::npos,
               "a toggle's choices are in level order, off first");
-        Check(page1.find("OnSelect gotoscreen \"pc_cheats_movement\"") != std::string::npos, "Cheats leads to Movement Cheats");
+        Check(page1.find("NamedValue \"PCCheatSuperJump\"") != std::string::npos, "movement cheats remain on Cheats");
         Check((page1.find("OnSelect gotoscreen \"cheats\"") != std::string::npos) == main,
               "the main menu's Cheats leads to the game's Code Input, the pause menu's has none");
-        Check(page2.find("NamedValue \"PCCheatSuperJump\"") != std::string::npos &&
-                  page2.find("text \"TBS_CHEAT_LOW_GRAVITY\"") != std::string::npos &&
+        Check(page1.find("NamedValue \"PCCheatSuperJump\"") != std::string::npos &&
+                  page1.find("text \"TBS_CHEAT_LOW_GRAVITY\"") != std::string::npos &&
                   page2.find("SuperSpeed") == std::string::npos,
               "the movement cheats' selectors");
         Check(page1.find("OnHighlight function \"PCCheatSync\"") != std::string::npos, "the cheat selectors sync on highlight");
-        const char* last = main ? "AddTextButton \"FEsubMenu_text8\"" : "AddTextButton \"FEpause_text7\"";
-        Check(page1.find(last) != std::string::npos && page1.find(main ? "FEsubMenu_text9" : "FEpause_text8") == std::string::npos,
+        const char* last = main ? "AddTextButton \"FEsubMenu_text9\"" : "AddTextSelector \"FEpause_text8\"";
+        Check(page1.find(last) != std::string::npos && page1.find(main ? "FEsubMenu_text10" : "FEpause_text9") == std::string::npos,
               "the Cheats screen fits the screen's slots");
         Check(page1.find("CheatAllMoves") == std::string::npos && page1.find("UnlockAll") == std::string::npos &&
                   page1.find("AwardCheatersSmashPoints") == std::string::npos && page2.find("Award") == std::string::npos,
@@ -257,6 +259,8 @@ int main(int argc, char** argv) {
         size_t item = script->find("        text \"TBS_PC_DISPLAY_OPTIONS\" 1\r\n        OnSelect gotoscreen \"display_options\"");
         size_t next_screen = script->find("AddScreen", options + 1);
         Check(options < item && item < next_screen, "its Options screen has a row opening it");
+        const size_t controls = script->find("        text \"TBS_PC_CONTROLS\" 1\r\n        OnSelect gotoscreen \"pc_controls\"");
+        Check(options < controls && controls < next_screen, "main and pause Options open the in-game Controls panel");
         Check(script->find("AddNamedValueInt \"PCDisplayMode\" 1 \"PCDisplayModeChanged\"") != std::string::npos, "borderless selected");
         Check(script->find("AddNamedValueInt \"PCResolution\" 3 \"PCResolutionChanged\"") != std::string::npos, "1920 x 1080 selected");
         Check(script->find("AddNamedValueInt \"PCFrameRate\" 6 \"PCFrameRateChanged\"") != std::string::npos, "custom fps selected");
@@ -291,8 +295,8 @@ int main(int argc, char** argv) {
     ctx.esp = 0x80000;
     hulk::RegisterDisplayCallbacks(ctx);
     Check(ctx.esp == 0x80000, "the guest's stack is as it was");
-    Check(kernel::registered.size() == 18, "eight selector callbacks, display sync, eight cheat callbacks and their sync");
-    if (kernel::registered.size() == 18) {
+    Check(kernel::registered.size() == 32, "display and cheat callbacks plus the Controls entry");
+    if (kernel::registered.size() == 32) {
         Check(kernel::registered[1].first == "PCResolutionChanged", "named as the script names them");
         Check(kernel::registered[1].second == std::vector<uint32_t>({0x409B40, 0x101, 0xBBEC0}), "functor through the shared handler");
         Check(kernel::registered[6].first == "PCRenderDistanceChanged", "the render distance's");
@@ -307,6 +311,7 @@ int main(int argc, char** argv) {
                   kernel::registered[17].second == std::vector<uint32_t>({0x409B30, 0x11F, 0xB46B0}),
               "the cheats' sync through Print");
     }
+    Check(kernel::registered.back().first == "PCBindingPageChanged", "native Controls callbacks registered");
     Check(!hulk::DisplaySync(ctx, 0x00123456), "a real Print owner goes to the game");
     ctx.ecx = 0xABCD;
     Check(hulk::DisplaySync(ctx, 0x108), "the sync");
