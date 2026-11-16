@@ -257,6 +257,8 @@ int main(int argc, char** argv) {
         size_t item = script->find("        text \"TBS_PC_DISPLAY_OPTIONS\" 1\r\n        OnSelect gotoscreen \"display_options\"");
         size_t next_screen = script->find("AddScreen", options + 1);
         Check(options < item && item < next_screen, "its Options screen has a row opening it");
+        const size_t controls = script->find("        text \"TBS_PC_CONTROLS\" 1\r\n        OnSelect function \"PCControlsOpen\"");
+        Check(options < controls && controls < next_screen, "main and pause Options open the in-game Controls panel");
         Check(script->find("AddNamedValueInt \"PCDisplayMode\" 1 \"PCDisplayModeChanged\"") != std::string::npos, "borderless selected");
         Check(script->find("AddNamedValueInt \"PCResolution\" 3 \"PCResolutionChanged\"") != std::string::npos, "1920 x 1080 selected");
         Check(script->find("AddNamedValueInt \"PCFrameRate\" 6 \"PCFrameRateChanged\"") != std::string::npos, "custom fps selected");
@@ -291,8 +293,8 @@ int main(int argc, char** argv) {
     ctx.esp = 0x80000;
     hulk::RegisterDisplayCallbacks(ctx);
     Check(ctx.esp == 0x80000, "the guest's stack is as it was");
-    Check(kernel::registered.size() == 18, "eight selector callbacks, display sync, eight cheat callbacks and their sync");
-    if (kernel::registered.size() == 18) {
+    Check(kernel::registered.size() == 19, "display and cheat callbacks plus the Controls entry");
+    if (kernel::registered.size() == 19) {
         Check(kernel::registered[1].first == "PCResolutionChanged", "named as the script names them");
         Check(kernel::registered[1].second == std::vector<uint32_t>({0x409B40, 0x101, 0xBBEC0}), "functor through the shared handler");
         Check(kernel::registered[6].first == "PCRenderDistanceChanged", "the render distance's");
@@ -307,6 +309,11 @@ int main(int argc, char** argv) {
                   kernel::registered[17].second == std::vector<uint32_t>({0x409B30, 0x11F, 0xB46B0}),
               "the cheats' sync through Print");
     }
+    Check(kernel::registered.back().first == "PCControlsOpen" &&
+              kernel::registered.back().second == std::vector<uint32_t>({0x409B30, 0x140, 0xB46B0}),
+          "Controls uses the registered frontend function callback");
+    Check(!hulk::TakeControlsRequest() && hulk::DisplaySync(ctx, 0x140) && hulk::TakeControlsRequest() && !hulk::TakeControlsRequest(),
+          "Controls selection queues exactly one host-panel request");
     Check(!hulk::DisplaySync(ctx, 0x00123456), "a real Print owner goes to the game");
     ctx.ecx = 0xABCD;
     Check(hulk::DisplaySync(ctx, 0x108), "the sync");

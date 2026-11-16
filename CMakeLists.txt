@@ -79,6 +79,7 @@ add_executable(hulk_controls_tests tests/controls_ui.cpp src/common/controls_ui.
     ${imgui_SOURCE_DIR}/imgui.cpp ${imgui_SOURCE_DIR}/imgui_draw.cpp
     ${imgui_SOURCE_DIR}/imgui_tables.cpp ${imgui_SOURCE_DIR}/imgui_widgets.cpp)
 target_include_directories(hulk_controls_tests PRIVATE src ${SDK}/runtime ${imgui_SOURCE_DIR})
+target_compile_definitions(hulk_controls_tests PRIVATE IMGUI_ENABLE_TEST_ENGINE=1)
 target_link_libraries(hulk_controls_tests PRIVATE tomlplusplus::tomlplusplus)
 add_test(NAME controls_menu_interaction COMMAND hulk_controls_tests)
 

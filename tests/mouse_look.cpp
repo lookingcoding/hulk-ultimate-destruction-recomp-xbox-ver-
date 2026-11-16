@@ -18,6 +18,8 @@ namespace mem { uint8_t* Base() { return nullptr; } }
 namespace hulk {
 void ReplayPad(int, input::Pad&) {}
 void NoteSettingChanged() {}
+bool ControlsOpen() { return false; }
+bool StepCameraDistance(int) { return false; }
 void SetCameraInvert(bool, bool) {} bool GetCameraInvertX() { return false; } bool GetCameraInvertY() { return false; }
 void SetPromptDevice(PromptDevice) {} PromptDevice GetPromptDevice() { return PromptDevice::Auto; }
 const char* PromptDeviceName(PromptDevice) { return "auto"; }

@@ -645,25 +645,6 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
 
             break;
         }
-        case WM_LBUTTONUP: {
-            if (in_menu && gamepad_detected.load(std::memory_order_relaxed)) break;
-            std::lock_guard lock(mouse_mutex);
-
-            break;
-        }
-        case WM_RBUTTONDOWN:
-        case WM_RBUTTONDBLCLK: {
-            if (in_menu && gamepad_detected.load(std::memory_order_relaxed)) break;
-            std::lock_guard lock(mouse_mutex);
-
-            break;
-        }
-        case WM_RBUTTONUP: {
-            if (in_menu && gamepad_detected.load(std::memory_order_relaxed)) break;
-            std::lock_guard lock(mouse_mutex);
-
-            break;
-        }
         case WM_MOUSEWHEEL:
         case WM_MOUSEHWHEEL: {
             if (in_menu && gamepad_detected.load(std::memory_order_relaxed)) break;
@@ -697,8 +678,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
             last_cursor_y = y;
             if (dx == 0 && dy == 0) break;
 
-            pointer_confirm_pending = false;
-            if (in_menu && matches(Action::MenuConfirm, VK_LBUTTON)) {
+            if (in_menu) {
                 if (gamepad_detected.load(std::memory_order_relaxed)) break;
                 // hovering highlights the slot under the cursor, within the tabs or within the list
                 if (HighlightedSlot()) {
@@ -741,11 +721,13 @@ void KeyboardPad(int port, input::Pad& pad) {
     if (controls_were_open.exchange(controls_open) != controls_open) {
         Clear();
         if (HWND hwnd = game_hwnd.load(std::memory_order_relaxed); hwnd && IsWindow(hwnd))
-            PostMessageW(hwnd, kSyncCursorMsg, 1, 0);
-        else ApplyCursorVisibilityOnWindowThread(nullptr, true);
+            PostMessageW(hwnd, kSyncCursorMsg, IsInMenuState() ? 1 : 0, 0);
+        else ApplyCursorVisibilityOnWindowThread(nullptr, IsInMenuState());
     }
     if (controls_open) {
         Clear();
+        pad = {};
+        pad.connected = true;
         return;
     }
 
