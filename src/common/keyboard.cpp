@@ -550,9 +550,17 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
     using Action = bindings::Action;
     const auto matches = [&](Action action, bindings::Input code) { return bindings::Matches(*map, action, code); };
     const auto press = [&](bindings::Input code, bool down) {
+        const bool mouse_input = code == VK_LBUTTON || code == VK_RBUTTON || code == VK_MBUTTON ||
+            code == VK_XBUTTON1 || code == VK_XBUTTON2 || code >= bindings::WheelUp;
+        if (in_menu && gamepad_detected.load(std::memory_order_relaxed) && mouse_input) {
+            keys[code].store(false, std::memory_order_relaxed);
+            std::lock_guard lock(mouse_mutex);
+            binding_latches[code].Reset();
+            return;
+        }
         const bool fresh = down && !Down(code);
         keys[code].store(down, std::memory_order_relaxed);
-        if (code == VK_LBUTTON || code == VK_RBUTTON || code == VK_MBUTTON || code == VK_XBUTTON1 || code == VK_XBUTTON2 || code >= bindings::WheelUp) {
+        if (mouse_input) {
             std::lock_guard lock(mouse_mutex);
             if (down) binding_latches[code].Press(); else binding_latches[code].Release();
         }

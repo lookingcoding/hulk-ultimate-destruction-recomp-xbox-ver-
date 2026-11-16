@@ -267,6 +267,7 @@ int main() {
     hulk::KeyboardPad(0, pad);
     if (!Check(!hulk::IsGamepadDetected(), "Gamepad remained detected after disconnected pad poll")) return 1;
     if (!Check(!hulk::IsCursorHiddenForTest(), "Cursor remained hidden in menu mode after gamepad disconnected")) return 1;
+    if (!Check(pad.analog[0] == 0, "An ignored menu click became active after controller disconnect")) return 1;
 
     // In gameplay mode, cursor is always hidden whether gamepad is connected or not
     hulk::SetMenuModeForTest(-1);
