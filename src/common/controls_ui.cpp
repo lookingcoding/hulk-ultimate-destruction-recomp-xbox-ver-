@@ -45,6 +45,7 @@ void SetControlsMouseHooks(ControlsMouseHooks hooks) {
 }
 void OpenControls() {
     std::lock_guard lock(state_mutex);
+    if (opened.load()) return;
     capturing.reset();
     captured.reset();
     controller.store(0);
@@ -135,7 +136,13 @@ void DrawControls(double) {
     ImGui::SetNextWindowSize(ImVec2(available.x > 760 ? 720 : available.x * .95f,
         available.y > 840 ? 800 : available.y * .95f), ImGuiCond_Always);
     bool visible = true;
-    if (ImGui::Begin("Controls / Keybinds", &visible, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
+    const bool contents = ImGui::Begin("Controls / Keybinds", &visible, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
+    if (!visible) {
+        ImGui::End();
+        Close();
+        return;
+    }
+    if (contents) {
         ImGui::TextWrapped("Select an action, then press a key or mouse button. Tab/arrows and Enter navigate; controller A selects, B goes back.");
         ImGui::TextWrapped("Escape can be bound. Use Cancel capture to cancel. Shared gameplay/menu inputs are allowed.");
         const bool block_edit = capturing.has_value() || pending_action.has_value();
