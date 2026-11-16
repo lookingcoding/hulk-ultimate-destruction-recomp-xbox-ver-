@@ -30,7 +30,7 @@ int main() {
     const std::vector<std::vector<Input>> expected = {
         {'W'}, {'S'}, {'A'}, {'D'}, {38}, {40}, {37}, {39}, {27}, {9}, {'C'}, {'V'},
         {32,13}, {'Q'}, {1}, {'E'}, {'2'}, {'1'}, {2}, {16}, {32,1}, {'Q',2}, {46}, {13},
-        {WheelUp}, {WheelDown}, {WheelUp}, {WheelDown}
+        {WheelUp,WheelLeft}, {WheelDown,WheelRight}, {WheelUp}, {WheelDown}
     };
     Check(expected.size() == ActionCount, "every action has a default expectation");
     for (size_t i=0; i<ActionCount; ++i) {

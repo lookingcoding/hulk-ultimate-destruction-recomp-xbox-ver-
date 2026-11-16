@@ -153,8 +153,10 @@ void DrawControls(double) {
         ImGui::EndDisabled();
         if (capturing) {
             ImGui::Text("Listening: %s", bindings::Info(*capturing).label);
-            if (ImGui::Button("Cancel capture") || ImGui::IsItemClicked()) { capturing.reset(); captured.reset(); }
-        }
+        } else ImGui::TextUnformatted("Select an action below.");
+        ImGui::BeginDisabled(!capturing);
+        if (ImGui::Button("Cancel capture") || ImGui::IsItemClicked()) { capturing.reset(); captured.reset(); }
+        ImGui::EndDisabled();
         if (capturing && captured) {
             pending_action = capturing; pending_input = captured;
             capturing.reset(); captured.reset();
@@ -171,7 +173,7 @@ void DrawControls(double) {
         if (ImGui::BeginChild("Actions", ImVec2(0, ImGui::GetContentRegionAvail().y * .55f), true)) {
             for (size_t i = 0; i < bindings::ActionCount; ++i) {
                 const auto action = bindings::Action(i);
-                const std::string row = std::string(bindings::Info(action).label) + "    [" + bindings::Label(*snapshot, action) + "]";
+                const std::string row = std::string(bindings::Info(action).label) + "    [" + bindings::Label(*snapshot, action) + "]###binding";
                 ImGui::PushID(int(i));
                 if (ImGui::Selectable(row.c_str(), selected == int(i))) {
                     selected = int(i); capturing = action; captured.reset();

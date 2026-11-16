@@ -163,6 +163,10 @@ static bool TestRebinding() {
     if (!Check(poll().ly == 0, "Held input leaked out of Controls")) return false;
     bindings::Reset();
     reset();
+    SetMenuModeForTest(1);
+    KeyboardMessage(nullptr, WM_MOUSEHWHEEL, MAKEWPARAM(0, WHEEL_DELTA), 0, nullptr);
+    if (!Check((poll().buttons & 0x08) != 0, "Default horizontal wheel menu navigation changed")) return false;
+    reset();
     return true;
 }
 
