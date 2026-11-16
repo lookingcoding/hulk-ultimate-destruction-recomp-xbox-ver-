@@ -12,7 +12,7 @@
 namespace hulk {
 void ReplayPad(int, input::Pad&) {}
 bool controls_open = false;
-bool ControlsOpen() { return controls_open; }
+bool ControlsCapturing() { return controls_open; }
 int zoom_steps = 0;
 bool StepCameraDistance(int steps) { zoom_steps += steps; return true; }
 void NoteSettingChanged() {}

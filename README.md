@@ -61,9 +61,11 @@ The game checks your disc image when it starts and tells you if it can't use it.
 
 ## PC Controls
 
-Open **Options > Controls / Keybinds** from the main menu or pause menu to change controls in the game. Every action shows its current inputs. Select a row and press a key, mouse button, or wheel direction. Enable **Add another input** to keep the current binding; **Unbind selected** clears it. Conflicts within the same gameplay/menu context offer **Replace conflicting bindings**, **Keep both**, or **Cancel**. Gameplay and menu actions may share inputs. **Reset to defaults** restores all bindings, both sensitivities, and mouse inversion.
+Open **Options > Controls / Keybinds** from the main menu or pause menu. The parent page contains **Keybinds**, **Invert mouse Y**, separate **Mouse sensitivity X/Y** sliders and **Reset mouse defaults**. It uses the game's own fonts, background, selection bars and navigation, like Display Options.
 
-The same panel has separate **Mouse sensitivity X** and **Mouse sensitivity Y** sliders and **Invert mouse Y**. Changes apply immediately and save after settling; **Save and close** saves immediately. Escape closes the panel when it is not capturing a binding. During capture, Escape itself can be bound; use **Cancel capture** to cancel.
+Open **Keybinds** for the dedicated keyboard/mouse binding list. Each row shows **Primary | Alternate** inputs together; **Actions** pages through all 28 actions, seven per page. Select a row, choose **Primary** or **Alternate**, then press a key, mouse button, or wheel direction. Escape/controller B cancels capture. **More...** offers **Add** (additional inputs) and **Unbind** (clear the row). Additional inputs remain supported and appear as `(+N)`; More shows the full current list. Conflicts offer **Replace**, **Keep both**, and **Cancel** in the game's native popup. Binding changes save immediately.
+
+**Reset keybinds to defaults** asks for confirmation and resets bindings. The parent's **Reset mouse defaults** separately restores both sensitivities and mouse inversion. Sliders apply immediately and save after settling. The native Back action returns from Keybinds to its parent page; held cancel inputs are consumed until release.
 
 Sensitivity multipliers range from 0.1 to 5.0, with both axes defaulting to 1.0. These keys go at the top level of `game/settings.toml`, before `[bindings]` (source builds use `settings.toml` beside the game executable):
 
@@ -74,7 +76,7 @@ mouse_invert_y = false
 mouse_smoothing = false
 ```
 
-The older `mouse_sensitivity` value initializes both axes; explicit X/Y values override it. The Controls panel shows current bindings. Existing game tooltips and mission hints continue to show the default keys.
+The older `mouse_sensitivity` value initializes both axes; explicit X/Y values override it. The native Controls page shows current bindings. Existing game tooltips and mission hints continue to show the default keys.
 
 Bindings are stored in the `[bindings]` table of `game/settings.toml`. Each action accepts a name or an array of names. `[]` or `"unbound"` disables an action. Missing or invalid entries use that action's defaults; an invalid array falls back as a whole. Names are case-insensitive, including letters, digits, F1-F24, arrows, Space, Enter, Escape, Tab, Delete, Shift/Ctrl/Alt and their Left/Right variants, Num0-Num9, MouseLeft/MouseRight/MouseMiddle/MouseX1/MouseX2, and WheelUp/Down/Left/Right.
 
@@ -87,7 +89,7 @@ zoom_in = ["WheelUp"]
 taunt = [] # unbound
 ```
 
-`menu_select` selects ordinary menu rows and advances selectors once per press. It is separate from gameplay `jump` (Space/Enter) and menu `menu_confirm` (Space/left click), preserving the default contextual behavior. The controls panel lists every action in the source model (`src/common/bindings.h`); controller bindings remain native and merge with keyboard/mouse input.
+`menu_select` selects ordinary menu rows and advances selectors once per press. It is separate from gameplay `jump` (Space/Enter) and menu `menu_confirm` (Space/left click), preserving the default contextual behavior. The Controls page lists every action in the source model (`src/common/bindings.h`); controller bindings remain native and merge with keyboard/mouse input.
 
 Keyboard and mouse input is mapped to player 1 alongside any connected Xbox/PlayStation controller. These are the defaults:
 

@@ -1,12 +1,13 @@
 #include "app/app.h"
 #include "common/addresses.h"
 #include "common/camera.h"
-#include "common/controls_ui.h"
+#include "common/native_controls.h"
 #include "common/diagnostics.h"
 #include "common/display_menu.h"
 #include "common/keyboard.h"
 #include "common/mods.h"
 #include "common/release.h"
+#include "common/replay.h"
 #include "common/settings_ui.h"
 #include "common/view.h"
 #include "core/input.h"
@@ -44,17 +45,23 @@ void OnInit() {
 void OnImageLoaded() {
     hulk::KeepCameraInvert();  // Camera Options' Invert X/Y as the player set them, not inverted at first
     // button prompts: a controller's when one is plugged in, before the game reads its strings
-    const bool has_pad = SDL_HasGamepad();
+    const bool has_pad = !hulk::BackgroundTest() && SDL_HasGamepad();
     ApplyPrompts(has_pad);
     hulk::SetGamepadDetected(has_pad);
 }
 
 void OnWindowReady(void* hwnd) {
-    hulk::SetGameWindow(hwnd);
+    if (!hulk::BackgroundTest()) hulk::SetGameWindow(hwnd);
 }
 
 void OnPad(int port, input::Pad& pad) {
     hulk::TickDisplaySettings();
+    if (hulk::BackgroundTest()) {
+        pad = {}; pad.connected = port == 0;
+        hulk::ReplayPad(port, pad);
+        hulk::ControlsPad(port, pad);
+        return;
+    }
     hulk::KeepCameraInvert();
     if (port == 0) {
         ApplyPrompts(pad.connected);  // a physical controller; keyboard input joins after
@@ -65,6 +72,7 @@ void OnPad(int port, input::Pad& pad) {
 }
 
 bool OnMessage(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t* result) {
+    if (hulk::BackgroundTest()) return false;
     if (hulk::ControlsMessage(message, wp, lp, result)) return true;
     return hulk::KeyboardMessage(hwnd, message, wp, lp, result);
 }
@@ -72,6 +80,7 @@ bool OnMessage(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t
 
 // What the runtime asks of the game; strings must be set, hooks may stay null
 const app::GameInfo app::kGame = {
+    .background_test = hulk::BackgroundTest,
     .title = L"The Incredible Hulk: Ultimate Destruction",               // window and splash
     .short_title = L"Hulk Recompiled",               // message boxes
     .name = L"Hulk Recompiled",                      // window classes, crash dumps, handover event
@@ -88,7 +97,7 @@ const app::GameInfo app::kGame = {
     .loaded = OnImageLoaded,                         // image in memory, before its entry point runs
     .window = OnWindowReady,                         // the game window is up
     .message = OnMessage,
-    .ui = hulk::DrawControls,                        // native Options opens the in-game Controls panel
+    .ui = nullptr,                                 // UI is rendered by the native frontend
     .pad = OnPad,
     .rumble = nullptr,                               // changes a rumble before it is set
     .file = hulk::ModFileView,                       // mods, and misc.rcf with the Display Options screen

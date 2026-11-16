@@ -1,2 +1,5 @@
 * text=auto
 *.bat text eol=crlf
+
+# Patch context lines intentionally contain a single space.
+*.patch text eol=lf -whitespace

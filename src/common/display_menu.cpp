@@ -1,4 +1,5 @@
 #include "common/display_menu.h"
+#include "common/native_controls.h"
 #include "common/addresses.h"
 #include "common/cheats.h"
 #include "common/language.h"
@@ -38,8 +39,7 @@ constexpr uint32_t kSetSelection = 0x64;  // TextSelector vtable offset, thiscal
 // the selectors' functors carry these as owners: the guest's null page, never an object; kSettings is the sync
 constexpr uint32_t kOwnerBase = 0x100;
 constexpr const char* kSyncName = "PCDisplaySync";
-constexpr uint32_t kControlsOwner = 0x140;
-std::atomic<bool> g_controls_requested{false};
+
 
 constexpr auto kSettleTime = std::chrono::milliseconds(400);
 
@@ -127,31 +127,30 @@ const Text kTexts[] = {
     {"TBS_PC_CHEATS_MOVEMENT", {"Movement Cheats", "Triches de mouvement", "Trucos de movimiento", "Cheat di movimento"}},
 };
 
-// Options > Cheats: a selector per cheat, its choices in level order (level 0 is off), on two screens; the main menu's
-// first screen also leads to the game's own Code Input screen
+// Options > Cheats: a selector per cheat, its choices in level order (level 0 is off), on one page; the main menu's
+// page also leads to the game's own Code Input screen
 using cheats::Cheat;
 struct CheatRow {
     Cheat cheat;
     const char* name;   // the named value is "PCCheat" + this, its callback that + "Changed"
     const char* label;  // string table key
     std::vector<const char*> choices;
-    int screen;  // 0: Cheats, 1: Movement Cheats
 };
 const std::vector<const char*> kOffOn = {"TBS_MENU_ITEM_CHOICE_OFF", "TBS_MENU_ITEM_CHOICE_ON"};
 const CheatRow kCheatRows[] = {
-    {Cheat::Invulnerability, "Invulnerability", "TBS_CHEAT_INVULNERABILITY", kOffOn, 0},
-    {Cheat::InfiniteRage, "InfiniteRage", "TBS_PC_CHEAT_INFINITE_RAGE", kOffOn, 0},
-    {Cheat::InfiniteHealth, "InfiniteHealth", "TBS_PC_CHEAT_INFINITE_HEALTH", kOffOn, 0},
-    {Cheat::Regeneration, "Regeneration", "TBS_PC_CHEAT_REGENERATION", kOffOn, 0},
+    {Cheat::Invulnerability, "Invulnerability", "TBS_CHEAT_INVULNERABILITY", kOffOn},
+    {Cheat::InfiniteRage, "InfiniteRage", "TBS_PC_CHEAT_INFINITE_RAGE", kOffOn},
+    {Cheat::InfiniteHealth, "InfiniteHealth", "TBS_PC_CHEAT_INFINITE_HEALTH", kOffOn},
+    {Cheat::Regeneration, "Regeneration", "TBS_PC_CHEAT_REGENERATION", kOffOn},
     {Cheat::Damage, "Damage", "TBS_PC_CHEAT_DAMAGE",
-     {"TBS_CHEAT_RENDER_MODE_NORMAL", "TBS_PC_DAMAGE_X2", "TBS_PC_DAMAGE_X4", "TBS_PC_DAMAGE_ONE_HIT"}, 0},
+     {"TBS_CHEAT_RENDER_MODE_NORMAL", "TBS_PC_DAMAGE_X2", "TBS_PC_DAMAGE_X4", "TBS_PC_DAMAGE_ONE_HIT"}},
     {Cheat::GameSpeed, "GameSpeed", "TBS_PC_CHEAT_GAME_SPEED",
-     {"TBS_PC_SCALE_100", "TBS_PC_SCALE_75", "TBS_PC_SCALE_50", "TBS_PC_SCALE_25"}, 0},
-    {Cheat::SuperJump, "SuperJump", "TBS_PC_CHEAT_SUPER_JUMP", kOffOn, 1},
-    {Cheat::LowGravity, "LowGravity", "TBS_CHEAT_LOW_GRAVITY", kOffOn, 1},
+     {"TBS_PC_SCALE_100", "TBS_PC_SCALE_75", "TBS_PC_SCALE_50", "TBS_PC_SCALE_25"}},
+    {Cheat::SuperJump, "SuperJump", "TBS_PC_CHEAT_SUPER_JUMP", kOffOn},
+    {Cheat::LowGravity, "LowGravity", "TBS_CHEAT_LOW_GRAVITY", kOffOn},
 };
 constexpr int kCheatRowCount = int(std::size(kCheatRows));
-constexpr const char* kCheatScreens[] = {"pc_cheats", "pc_cheats_movement"};
+constexpr const char* kCheatScreen = "pc_cheats";
 constexpr const char* kCheatSyncName = "PCCheatSync";
 // the cheats' functors' owners, past the display options' (kSettings and its sync)
 constexpr uint32_t kCheatSyncOwner = 0x11F, kCheatOwnerBase = 0x120;
@@ -328,22 +327,22 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
     };
 
     // Options > Cheats (cheats.h): the same kind of selectors as Display Options, calling back the host with the
-    // cheat's level, on two screens
-    auto cheat_screen = [&](int page) {
+    // cheat's level, on one page
+    auto cheat_screen = [&]() {
         std::string sub;
-        sub += "AddScreen \"" + std::string(kCheatScreens[page]) + "\"" + nl;
+        sub += "AddScreen \"" + std::string(kCheatScreen) + "\"" + nl;
         sub += "{" + nl;
         sub += "    $MACRO_INSERT typicalScreenSetup" + nl + nl;
         sub += std::string("    AddLabel \"") + l.title + "\"" + nl;
         sub += "    {" + nl;
-        sub += std::string("        text \"") + (page ? "TBS_PC_CHEATS_MOVEMENT" : "TBS_MENU_ITEM_SF_CHEATS") + "\" 1" + nl;
+        sub += std::string("        text \"") + "TBS_MENU_ITEM_SF_CHEATS" + "\" 1" + nl;
         sub += "        $MACRO_INSERT FormatTitleText" + nl + nl;
         sub += "        TransitionAnimEnter \"fadein\"" + nl;
         sub += "        TransitionAnimExit  \"fadeout\"" + nl;
         sub += "    }" + nl;
         int n = 0;
         for (const CheatRow& r : kCheatRows) {
-            if (r.screen != page) continue;
+
             const std::string row_n = std::to_string(++n);
             sub += nl + "    AddTextSelector \"" + l.row + row_n + "\"" + nl;
             sub += "    {" + nl;
@@ -368,10 +367,7 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
             sub += bars(row_n);
             sub += "    }" + nl;
         };
-        if (page == 0) {
-            button("TBS_PC_CHEATS_MOVEMENT", kCheatScreens[1]);
-            if (l.main) button("TBS_MENU_ITEM_SF_CODE_INPUT", "cheats");  // the disc's own Code Input screen
-        }
+        if (l.main) button("TBS_MENU_ITEM_SF_CODE_INPUT", "cheats");  // the disc's own Code Input screen
         sub += nl + "    $MACRO_INSERT SetupControlButtonLabel" + nl;
         sub += "}" + nl + nl;
         return sub;
@@ -395,7 +391,7 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
     std::string in = script;
     std::vector<size_t> cheat_digits;  // the main menu's, where they are in the script: before Options, unmoved
     if (l.main) {
-        const std::string link = "gotoscreen \"dev_cheats\"", target = std::string("gotoscreen \"") + kCheatScreens[0] + "\"";
+        const std::string link = "gotoscreen \"dev_cheats\"", target = std::string("gotoscreen \"") + kCheatScreen + "\"";
         for (size_t at = in.find(link); at != std::string::npos; at = in.find(link, at + target.size())) in.replace(at, link.size(), target);
         const std::string update = "        OnSelect function \"UpdateCheatsScreen\"" + nl;  // the developer screen's own
         for (size_t at = in.find(update); at != std::string::npos; at = in.find(update, at)) in.erase(at, update.size());
@@ -406,7 +402,7 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
             return std::nullopt;
         }
         std::vector<size_t> at;
-        const std::string block = cheat_values(at) + cheat_screen(0);
+        const std::string block = cheat_values(at) + cheat_screen();
         in.replace(from, to - from, block);
         for (size_t a : at) cheat_digits.push_back(from + a);
     }
@@ -426,13 +422,13 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
     row += row_end.size();
 
     // the Options screen's rows after Camera Options: Display Options, then Cheats
-    auto options_row = [&](const char* slot, const char* text, const char* screen_name, const std::string& n, bool function = false) {
+    auto options_row = [&](const char* slot, const char* text, const char* screen_name, const std::string& n) {
         std::string row_text;
         row_text += nl;
         row_text += std::string("    AddTextButton \"") + slot + "\"" + nl;
         row_text += "    {" + nl;
         row_text += std::string("        text \"") + text + "\" 1" + nl;
-        row_text += std::string(function ? "        OnSelect function \"" : "        OnSelect gotoscreen \"") + screen_name + "\"" + nl;
+        row_text += std::string("        OnSelect gotoscreen \"") + screen_name + "\"" + nl;
         row_text += "        OnHighlight function \"UpdateControlButtonString\" \"DynamicControlButtonLabel\"  \"1\"" + nl;
         if (l.main) row_text += bars(n) + "        halign left" + nl;
         else row_text += nl + "        $MACRO_INSERT FormatText" + nl + bars(n);
@@ -440,13 +436,10 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
         return row_text;
     };
     std::string item = options_row(l.item, "TBS_PC_DISPLAY_OPTIONS", "display_options", l.main ? "5" : "4") +
-                       options_row(l.cheats_item, "TBS_MENU_ITEM_SF_CHEATS", kCheatScreens[0], l.main ? "6" : "5");
+                       options_row(l.cheats_item, "TBS_MENU_ITEM_SF_CHEATS", kCheatScreen, l.main ? "6" : "5");
 
-    // A host panel uses a function callback rather than another guest screen:
-    // the main frontend already uses the game's full 64-screen table.
-    const std::string controls = options_row(l.main ? "FEmain_left_item7" : "FEpause_text6",
-        "TBS_PC_CONTROLS", "PCControlsOpen", l.main ? "7" : "6", true);
-    item += controls;
+    item += options_row(l.main ? "FEmain_left_item7" : "FEpause_text6",
+                        "TBS_PC_CONTROLS", "pc_controls", l.main ? "7" : "6");
 
     std::string sub;
     sub += "# PC display options (Hulk Recompiled): the selectors call back the host" + nl;
@@ -491,9 +484,11 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
         const size_t values_at = sub.size();
         sub += cheat_values(at);
         for (size_t a : at) digits.push_back(values_at + a);
-        sub += cheat_screen(0);
+        sub += cheat_screen();
     }
-    sub += cheat_screen(1);
+    // Consolidating the eight cheat selectors preserves all settings and frees one of
+    // the retail frontend's 64 screen slots for the native Controls page.
+    sub += NativeControlsScript(l.title, l.row, l.main, nl);
 
     Script out{};
     out.text = in.substr(0, row) + item + in.substr(row, screen - row) + sub + in.substr(screen);
@@ -735,6 +730,7 @@ std::optional<EditedStrings> EditStrings(const std::vector<uint8_t>& in, int col
         AppendUtf16(pad, t.text[column]);
         AppendUtf16(pad, "\r\n");
     }
+    AppendUtf16(pad, NativeControlsStrings().c_str());
     EditedStrings out;
     out.controller = pad;
     out.keyboard = KeyboardPrompts(pad, column, false);
@@ -924,7 +920,6 @@ void RegisterDisplayCallbacks(X86Context& ctx) {
     for (int i = 0; i < kCheatRowCount; i++)
         callbacks.emplace_back(std::string("PCCheat") + kCheatRows[i].name + "Changed", kCheatOwnerBase + i, false);
     callbacks.emplace_back(kCheatSyncName, kCheatSyncOwner, true);
-    callbacks.emplace_back("PCControlsOpen", kControlsOwner, true);
     const uint32_t esp = ctx.esp;
     for (const auto& [name, owner, sync] : callbacks) {
         // the name only lives through the call, below the guest's stack
@@ -938,6 +933,7 @@ void RegisterDisplayCallbacks(X86Context& ctx) {
         kernel::CallGuest(ctx, sync ? kRegisterCallback : kRegisterIntCallback, {ctx.esp, functor});
     }
     ctx.esp = esp;
+    RegisterControlsCallbacks(ctx);
 }
 
 namespace {
@@ -957,13 +953,8 @@ void SetSelector(X86Context& ctx, const char* name, uint32_t choice) {
 }
 }  // namespace
 
-bool TakeControlsRequest() { return g_controls_requested.exchange(false); }
-
 bool DisplaySync(X86Context& ctx, uint32_t owner) {
-    if (owner == kControlsOwner) {
-        g_controls_requested.store(true);
-        return true;
-    }
+    if (NativeControlsFunction(ctx, owner)) return true;
     if (owner == kCheatSyncOwner) {
         // the cheats' selectors show their levels, which the other menu (main or pause) may have changed
         for (const CheatRow& r : kCheatRows) SetSelector(ctx, CheatSelector(r).c_str(), uint32_t(cheats::Level(r.cheat)));
@@ -976,6 +967,7 @@ bool DisplaySync(X86Context& ctx, uint32_t owner) {
 }
 
 bool DisplayCallback(uint32_t owner, uint32_t value) {
+    if (NativeControlsValue(owner, value)) return true;
     if (owner >= kCheatOwnerBase && owner < kCheatOwnerBase + uint32_t(kCheatRowCount)) {
         const CheatRow& r = kCheatRows[owner - kCheatOwnerBase];
         if (value < r.choices.size()) cheats::Select(r.cheat, int(value));  // cheats.h saves it

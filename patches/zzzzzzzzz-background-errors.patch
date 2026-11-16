@@ -1,0 +1,46 @@
+diff --git a/runtime/app/game_code.cpp b/runtime/app/game_code.cpp
+--- a/runtime/app/game_code.cpp
++++ b/runtime/app/game_code.cpp
+@@ -737,6 +737,13 @@
+ }  // namespace
+ 
+ bool PrepareGameCode(const GameFiles& game) {
++    if (kGame.background_test && kGame.background_test()) {
++        // A hidden fixture never opens compiler/progress/error windows.
++        for (const Image& image : Images())
++            if (image.xbe == IMAGE_XBE && dispatch::Load(CodeDll(image))) return true;
++        LOGE("test fixture: prebuilt game DLL required; aborting without UI");
++        return false;
++    }
+     // one build at a time: a second copy of the game started meanwhile waits for it, then finds the DLL current
+     std::wstring mutex_name = std::wstring(kGame.name) + L"-GameCode";
+     HANDLE lock = CreateMutexW(nullptr, FALSE, mutex_name.c_str());
+diff --git a/runtime/app/game_files.cpp b/runtime/app/game_files.cpp
+--- a/runtime/app/game_files.cpp
++++ b/runtime/app/game_files.cpp
+@@ -111,12 +111,14 @@
+     }
+ 
+     if (other_name.empty()) {
++        if (kGame.background_test && kGame.background_test()) return false;
+         MessageBoxW(nullptr, kGame.missing, kGame.short_title, MB_ICONERROR);
+         return false;
+     }
+     std::wstring text = other_name.filename().wstring() +
+                         L" is a different release of the game than this build was made from, and will most likely "
+                         L"crash.\n\nStart it anyway?";
++    if (kGame.background_test && kGame.background_test()) return false;
+     if (MessageBoxW(nullptr, text.c_str(), kGame.short_title, MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2) != IDYES) return false;
+     game = std::move(other);
+     kernel::MountDisc(std::move(other_disc));
+diff --git a/runtime/app/main.cpp b/runtime/app/main.cpp
+--- a/runtime/app/main.cpp
++++ b/runtime/app/main.cpp
+@@ -355,6 +355,7 @@
+         SetWindowTextW(app::g_hwnd, (std::wstring(app::kGame.title) + L" [" + std::to_wstring(app::Instance()) + L"]").c_str());
+     if (!kernel::Boot(std::move(game.xbe), IMAGE_XBE, game.dir.string(), (app::ExeDir() / hdd).string())) {
+         app::RequireDisplay(false);
++        if (app::g_background_test) return 1;
+         MessageBoxW(app::g_hwnd, L"The game failed to start, see the log in the logs folder.", app::kGame.short_title,
+                     MB_ICONERROR);
+         return 1;

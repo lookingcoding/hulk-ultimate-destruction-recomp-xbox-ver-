@@ -16,7 +16,7 @@
 #include "common/addresses.h"
 #include "common/keyboard.h"
 #include "common/bindings.h"
-#include "common/controls_ui.h"
+#include "common/native_controls.h"
 #include "common/input_mapping.h"
 #include "common/display_menu.h"
 #include "common/view.h"
@@ -246,6 +246,7 @@ std::optional<Slot> HighlightedSlot(bool* selector = nullptr) {
     uint32_t mgr = 0, screen = 0, dialog = 0, text = 0, lo = 0, hi = 0;
     if (!ReadGuestU32(base, hulk::addr::kFrontend, mgr) || !mgr) return std::nullopt;
     if (!ReadGuestU32(base, mgr + 0x1760u, dialog) || dialog) return std::nullopt;
+    if (!ReadGuestU32(base, mgr + 0x2218u, dialog) || dialog) return std::nullopt;
     if (!ReadGuestU32(base, mgr + 0x175Cu, screen) || !screen) return std::nullopt;
     if (!ReadGuestU32(base, screen + 0x48u, text) || !text) return std::nullopt;
     if (!ReadGuestU32(base, text + 0x20u, lo) || !ReadGuestU32(base, text + 0x24u, hi)) return std::nullopt;
@@ -261,7 +262,7 @@ std::optional<Slot> HighlightedSlot(bool* selector = nullptr) {
                 uint32_t child = 0, label = 0, vtable = 0;
                 if (!ReadGuestU32(base, screen + 0x44Cu + i * 4, child) || !child) break;
                 if (ReadGuestU32(base, child + kLabelPointer, label) && label == text &&
-                    ReadGuestU32(base, child, vtable) && vtable == hulk::addr::kTextSelectorVtable) {
+                    ReadGuestU32(base, child, vtable) && (vtable == hulk::addr::kTextSelectorVtable || vtable == hulk::addr::kHSliderVtable)) {
                     *selector = true;
                     break;
                 }
@@ -358,7 +359,7 @@ void ApplyCursorVisibilityOnWindowThread(HWND hwnd, bool in_menu) {
     const bool gamepad = gamepad_detected.load(std::memory_order_relaxed);
 
     CursorMode target_mode;
-    if (!focused || ControlsOpen()) {
+    if (!focused || ControlsCapturing()) {
         target_mode = CursorMode::Visible;
     } else if (!in_menu) {
         target_mode = CursorMode::GameplayLock;
@@ -541,7 +542,7 @@ bool KeyboardMessage(void* hwnd_ptr, uint32_t message, uintptr_t wp, intptr_t lp
         return true;
     }
 
-    if (ControlsOpen()) {
+    if (ControlsCapturing()) {
         Clear();
         ApplyCursorVisibilityOnWindowThread(hwnd, true);
         return false;
@@ -721,7 +722,7 @@ void KeyboardPad(int port, input::Pad& pad) {
     SetGamepadDetected(physical_connected);
     pad.connected = true;
 
-    const bool controls_open = ControlsOpen();
+    const bool controls_open = ControlsCapturing();
     if (controls_were_open.exchange(controls_open) != controls_open) {
         Clear();
         if (HWND hwnd = game_hwnd.load(std::memory_order_relaxed); hwnd && IsWindow(hwnd))
