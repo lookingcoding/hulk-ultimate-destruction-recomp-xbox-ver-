@@ -38,6 +38,8 @@ constexpr uint32_t kSetSelection = 0x64;  // TextSelector vtable offset, thiscal
 // the selectors' functors carry these as owners: the guest's null page, never an object; kSettings is the sync
 constexpr uint32_t kOwnerBase = 0x100;
 constexpr const char* kSyncName = "PCDisplaySync";
+constexpr uint32_t kControlsOwner = 0x140;
+std::atomic<bool> g_controls_requested{false};
 
 constexpr auto kSettleTime = std::chrono::milliseconds(400);
 
@@ -67,6 +69,7 @@ struct Text {
 };
 
 const Text kTexts[] = {
+    {"TBS_PC_CONTROLS", {"Controls / Keybinds", "Commandes / Touches", "Controles / Teclas", "Comandi / Tasti"}},
     {"TBS_PC_DISPLAY_OPTIONS", {"Display Options", "Options d'affichage", "Opciones de pantalla", "Opzioni schermo"}},
     {"TBS_PC_DISPLAY_MODE", {"Display Mode", "Mode d'affichage", "Modo de pantalla", "Modalità schermo"}},
     {"TBS_PC_FULLSCREEN", {"Fullscreen", "Plein écran", "Pantalla completa", "Schermo intero"}},
@@ -423,13 +426,13 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
     row += row_end.size();
 
     // the Options screen's rows after Camera Options: Display Options, then Cheats
-    auto options_row = [&](const char* slot, const char* text, const char* screen_name, const std::string& n) {
+    auto options_row = [&](const char* slot, const char* text, const char* screen_name, const std::string& n, bool function = false) {
         std::string row_text;
         row_text += nl;
         row_text += std::string("    AddTextButton \"") + slot + "\"" + nl;
         row_text += "    {" + nl;
         row_text += std::string("        text \"") + text + "\" 1" + nl;
-        row_text += std::string("        OnSelect gotoscreen \"") + screen_name + "\"" + nl;
+        row_text += std::string(function ? "        OnSelect function \"" : "        OnSelect gotoscreen \"") + screen_name + "\"" + nl;
         row_text += "        OnHighlight function \"UpdateControlButtonString\" \"DynamicControlButtonLabel\"  \"1\"" + nl;
         if (l.main) row_text += bars(n) + "        halign left" + nl;
         else row_text += nl + "        $MACRO_INSERT FormatText" + nl + bars(n);
@@ -438,6 +441,12 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
     };
     std::string item = options_row(l.item, "TBS_PC_DISPLAY_OPTIONS", "display_options", l.main ? "5" : "4") +
                        options_row(l.cheats_item, "TBS_MENU_ITEM_SF_CHEATS", kCheatScreens[0], l.main ? "6" : "5");
+
+    // A host panel uses a function callback rather than another guest screen:
+    // the main frontend already uses the game's full 64-screen table.
+    const std::string controls = options_row(l.main ? "FEmain_left_item7" : "FEpause_text6",
+        "TBS_PC_CONTROLS", "PCControlsOpen", l.main ? "7" : "6", true);
+    item += controls;
 
     std::string sub;
     sub += "# PC display options (Hulk Recompiled): the selectors call back the host" + nl;
@@ -915,6 +924,7 @@ void RegisterDisplayCallbacks(X86Context& ctx) {
     for (int i = 0; i < kCheatRowCount; i++)
         callbacks.emplace_back(std::string("PCCheat") + kCheatRows[i].name + "Changed", kCheatOwnerBase + i, false);
     callbacks.emplace_back(kCheatSyncName, kCheatSyncOwner, true);
+    callbacks.emplace_back("PCControlsOpen", kControlsOwner, true);
     const uint32_t esp = ctx.esp;
     for (const auto& [name, owner, sync] : callbacks) {
         // the name only lives through the call, below the guest's stack
@@ -947,7 +957,13 @@ void SetSelector(X86Context& ctx, const char* name, uint32_t choice) {
 }
 }  // namespace
 
+bool TakeControlsRequest() { return g_controls_requested.exchange(false); }
+
 bool DisplaySync(X86Context& ctx, uint32_t owner) {
+    if (owner == kControlsOwner) {
+        g_controls_requested.store(true);
+        return true;
+    }
     if (owner == kCheatSyncOwner) {
         // the cheats' selectors show their levels, which the other menu (main or pause) may have changed
         for (const CheatRow& r : kCheatRows) SetSelector(ctx, CheatSelector(r).c_str(), uint32_t(cheats::Level(r.cheat)));
