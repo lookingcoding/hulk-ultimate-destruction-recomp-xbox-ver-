@@ -1,9 +1,9 @@
 {
   "safety": {
-    "Pid": 79348,
-    "Observations": 1459,
+    "Pid": 89072,
+    "Observations": 1425,
     "VisibleOrForegroundViolations": 0,
-    "Seconds": 166.0647444,
+    "Seconds": 166.1429205,
     "Audio": "samples discarded; no XAudio2 device",
     "Input": "internal replay only"
   },
@@ -33,12 +33,12 @@
     "src/common/binding_prompts.h": "0e686eaae9f70e69114ee44f32d09a6872634202f82491735b34158d3172f609",
     "src/common/native_hints.cpp": "e0ff2609db014b1715b0d245016b3641d561c873c2e7375a6337dc2723b8b73c",
     "src/common/native_hints.h": "5142e0213a584cc8fa34be0cdd21dd1d5f4b2f54ed22ec9e76df8af09a599c2a",
-    "src/common/display_menu.cpp": "90c5faaf567c6549e5ed61dd70f73af37d6adc208280be8c764b9da0b6593ad5",
+    "src/common/display_menu.cpp": "9d50667ce9ee3ff3794725964ed76e67e6a84efbc200e4170862aac97a37d557",
     "src/common/addresses.h": "11aaed1e037b43317d66bd9cb79cf8bd1088e0f525cbe5bac26edf7471bc132c",
     "src/game/hooks.cpp": "de62266b97d3c13ac85501233009f8f53fb741bae5150003905f4f031bd61d72",
     "tests/binding_prompts.cpp": "5391908241d03ad05fe11de10eb9172421d4b660d710d36dcc29574003394bc3",
     "tests/mouse_look.cpp": "2690a1023e5d67641c5d08abca929d0215ce51cb29f6fc31e380c7231fc276b8",
-    "tests/display_menu.cpp": "9f5661474a575463220230040b05b2684400a30a7be1698843c2468b804567f3",
+    "tests/display_menu.cpp": "bee53e4080c5fed74e856b59efd279fc7c06797fa4cfc39c04524c25ebd8a1e5",
     "tools/Test-NativeControls.ps1": "87cefc5f89d6eefc59ad4499b7590ca7e4a4821c821897a29771556a9e7d0cec",
     "tests/fixtures/live-binding-hints.input": "a6fd41fdab68485ab25231d2062baf21e2af59aed76ead08feea075f66cd30da",
     "CMakeLists.txt": "d244aeddb0c0deb06cb37befa09a8f04adb39e6d6f13ab79a20a3540d47c6c93",
@@ -46,23 +46,28 @@
     "src/common/display_menu.h": "31120b9a9847c1415877a0dea1fcadd8ce88bcb8ec63c42258d245a3ce378fd7"
   },
   "binaries_sha256": {
-    "HulkRecompiled.exe": "47fd15fccae15961d890a58be75f12cb2e8aea6057e8d393bdfaafb8f8076894",
-    "HulkRecompiled.dll": "4bfce4213f23329c98553b5b85d48a14b95601010f6c0744bba27acd7e389652",
-    "HulkRecompiledUSA.exe": "f0e4c3d19161d35bb9d027bf8aa7acd8d4961efd35e5e960eb8ab73cb8c715bf",
-    "HulkRecompiledUSA.dll": "491e05372e92a9363cd753efd661c3cd5a2c5fa2b377692985c106b2217d5656"
+    "HulkRecompiled.exe": "cbdb99e7f3dd829adacfbfad98cf10a5965f8d6561b9f5d8d53430ffeef01542",
+    "HulkRecompiled.dll": "fb948caa8b636b6dae7ae441ebbca2edf05eda494cd7f94f58b11b68d2aaac2b",
+    "HulkRecompiledUSA.exe": "6f2503db1fd7ddf0b9e0f7138790f537c6b21f256d3bcabec7bd064da98b1090",
+    "HulkRecompiledUSA.dll": "aa3ea451a5f2fbfbc99f6acd28716eae36e0ff31115faf2ca42bee5db13d7629"
   },
   "images": {
     "hint-before.png": {
-      "png_sha256": "8823b682e22efbbac24ed9a3425131b675821e57e28eba13db17dac4d9f52935",
-      "bmp_sha256": "b53b661d62a1567cc302f130795633f6bf8c4138612ab186b9cd28b664c444cd"
+      "png_sha256": "9ffdb30e11ba2d3b1d6763141e851b80ad2630bd1436f4df61105375e4bd6e23",
+      "bmp_sha256": "031e113cfc11eab5602b5f7b8e9f627bd48a5a661fe29f570c31b1e09d5ec12c"
     },
     "hint-after.png": {
-      "png_sha256": "e36900be0e5be5eccafe2cfd44ddedf696614daf5e2720339637475f135b2475",
-      "bmp_sha256": "99e5685bcc44d5fe363fd1af5a9fc25e3039eed6ee0f085ed415c3906f7c4671"
+      "png_sha256": "ad6f6c50a3c93747ff3e04d596b6a84f14bff66a6c0b0b4f9c0e6a5938e78c0c",
+      "bmp_sha256": "7fd761f321efe977301c2380c8bc5a235be7eaeeaceab99e73e5d9bc415e4f13"
     },
     "hint-reset.png": {
-      "png_sha256": "bba574a63203b569ed8975247ac2050bf6fdcc041e40a91b24eef43924a0ae7e",
-      "bmp_sha256": "990411917d033f68a6e0e5e5fdad149c324301a45ed748aa22d5579428fc3f7b"
+      "png_sha256": "0d43b20aa3ea50ccb01d8d2a67cb0916821b08474dfaa2cc2b5e4dcbc34b6776",
+      "bmp_sha256": "3e8d4c527d3dc8a6795c90d68ece39f4d8e1ed07f9abd50e29f384c01ba431db"
     }
-  }
+  },
+  "context_regressions": [
+    "Camera reset rebound to F",
+    "Target-cycle help and tutorial rebound to T",
+    "Word-only targeting/charge hints identify bound keys"
+  ]
 }
