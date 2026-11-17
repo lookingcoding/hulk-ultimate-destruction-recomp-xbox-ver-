@@ -51,6 +51,9 @@ inline constexpr uint32_t kPhysicsWorld = 0x00554C10;  // its gravity's y at +0x
 #define HULK_SUB_DELETE_FIBER sub_0035550A
 #define HULK_SUB_CAMERA_INVERT_X sub_000BBD80  // CameraInvertXChanged
 #define HULK_SUB_CAMERA_INVERT_Y sub_000BBDA0  // CameraInvertYChanged
+#define HULK_SUB_NATIVE_TEXT_DRAW sub_000F7D60
+#define HULK_SUB_FE_TEXT_LAYOUT sub_000F83F0
+#define HULK_SUB_FE_TEXT_DESTROY sub_000F7960
 #define HULK_SUB_HINT_BEGIN sub_000CE700       // hud_triggerButtonHintBegin
 inline constexpr uint32_t kFrameSwapVBlanks = 0x0055549C;     // vertical blanks since the last swap
 inline constexpr uint32_t kFrameSwapOneVBlank = 0x005554A0;   // byte: wait for one blank, not two (loading)
@@ -108,6 +111,9 @@ inline constexpr uint32_t kPhysicsWorld = 0x004F8720;
 #define HULK_SUB_DELETE_FIBER sub_00350EAA
 #define HULK_SUB_CAMERA_INVERT_X sub_000BBF30
 #define HULK_SUB_CAMERA_INVERT_Y sub_000BBF50
+#define HULK_SUB_NATIVE_TEXT_DRAW sub_000F7F80
+#define HULK_SUB_FE_TEXT_LAYOUT sub_000F8610
+#define HULK_SUB_FE_TEXT_DESTROY sub_000F7B80
 #define HULK_SUB_HINT_BEGIN sub_000CE870       // hud_triggerButtonHintBegin
 inline constexpr uint32_t kFrameSwapVBlanks = 0x004F8020;
 inline constexpr uint32_t kFrameSwapOneVBlank = 0x004F8024;

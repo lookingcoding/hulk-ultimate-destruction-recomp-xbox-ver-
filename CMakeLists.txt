@@ -58,7 +58,7 @@ add_executable(hulk_kernel_io_tests tests/kernel_io.cpp ${SDK}/runtime/kernel/io
 target_include_directories(hulk_kernel_io_tests PRIVATE ${SDK}/runtime)
 add_test(NAME kernel_io_completion COMMAND hulk_kernel_io_tests)
 add_executable(hulk_display_menu_tests tests/display_menu.cpp src/common/display_menu.cpp src/common/cheats.cpp src/common/view.cpp
-    src/common/rcf.cpp src/common/language.cpp src/common/native_controls.cpp src/common/bindings.cpp)
+    src/common/rcf.cpp src/common/language.cpp src/common/native_controls.cpp src/common/bindings.cpp src/common/binding_prompts.cpp)
 target_include_directories(hulk_display_menu_tests PRIVATE src ${SDK}/runtime)
 target_link_libraries(hulk_display_menu_tests PRIVATE tomlplusplus::tomlplusplus)
 add_test(NAME display_menu_rcf COMMAND hulk_display_menu_tests ${CMAKE_CURRENT_SOURCE_DIR}/assets/misc.rcf)
@@ -88,6 +88,17 @@ add_test(NAME native_controls_interaction_usa COMMAND hulk_controls_usa_tests)
 add_executable(hulk_native_screen_tests tests/native_screen.cpp src/common/native_screen.cpp)
 target_include_directories(hulk_native_screen_tests PRIVATE src ${SDK}/runtime)
 add_test(NAME native_keybind_page_lifecycle COMMAND hulk_native_screen_tests)
+
+foreach(region IN ITEMS eu usa)
+    add_executable(hulk_hint_${region}_tests tests/binding_prompts.cpp src/common/bindings.cpp
+        src/common/binding_prompts.cpp src/common/native_hints.cpp)
+    target_include_directories(hulk_hint_${region}_tests PRIVATE src ${SDK}/runtime)
+    target_link_libraries(hulk_hint_${region}_tests PRIVATE tomlplusplus::tomlplusplus)
+    if(region STREQUAL "usa")
+        target_compile_definitions(hulk_hint_${region}_tests PRIVATE HULK_USA=1)
+    endif()
+    add_test(NAME live_binding_hints_${region} COMMAND hulk_hint_${region}_tests)
+endforeach()
 
 file(GLOB XBE_HOST_SOURCES CONFIGURE_DEPENDS src/*/*.cpp)
 list(FILTER XBE_HOST_SOURCES EXCLUDE REGEX "/src/game(_usa)?/")

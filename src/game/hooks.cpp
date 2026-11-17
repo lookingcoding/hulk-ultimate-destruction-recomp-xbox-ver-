@@ -16,6 +16,8 @@
 #include "common/display_menu.h"
 #include "common/native_controls.h"
 #include "common/native_screen.h"
+#include "common/native_hints.h"
+#include "common/binding_prompts.h"
 #include "common/language.h"
 #include "common/simulation.h"
 #include "common/view.h"
@@ -30,6 +32,34 @@ X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_CALLBACKS));
 X86_FUNC(HULK_SUB_FE_CALLBACKS) {
     HULK_IMP(HULK_SUB_FE_CALLBACKS)(ctx, base);
     hulk::RegisterDisplayCallbacks(ctx);
+}
+
+// Cached menu footer strings bypass FEString layout; resolve them before native measurement/drawing too.
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_NATIVE_TEXT_DRAW));
+X86_FUNC(HULK_SUB_NATIVE_TEXT_DRAW) {
+    const uint32_t displacement = hulk::PrepareNativePromptDraw(ctx);
+    struct RestoreStack {
+        X86Context& ctx; uint32_t displacement;
+        ~RestoreStack() { ctx.esp += displacement; }
+    } restore{ctx, displacement};
+    HULK_IMP(HULK_SUB_NATIVE_TEXT_DRAW)(ctx, base);
+}
+
+// Resolve cached semantic hint text before the game's own wrapping, measuring and drawing.
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_TEXT_LAYOUT));
+X86_FUNC(HULK_SUB_FE_TEXT_LAYOUT) {
+    const uint32_t owner = ctx.ecx;
+    struct Restore {
+        uint32_t owner, raw;
+        ~Restore() { kernel::W32(owner + 0x10, raw); }
+    } restore{owner, kernel::R32(owner + 0x10)};
+    hulk::PrepareNativeHint(ctx);
+    HULK_IMP(HULK_SUB_FE_TEXT_LAYOUT)(ctx, base);
+}
+X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_TEXT_DESTROY));
+X86_FUNC(HULK_SUB_FE_TEXT_DESTROY) {
+    hulk::ReleaseNativeHint(ctx);
+    HULK_IMP(HULK_SUB_FE_TEXT_DESTROY)(ctx, base);
 }
 
 // The dedicated Keybinds page is a native FEMenu, beyond the retail 64-slot cache.
@@ -107,7 +137,7 @@ X86_FUNC(HULK_SUB_MENU_PROMPT) {
 
 // hud_triggerButtonHintBegin (the button's code, the instruction's key): the HUD's mission hints draw that button's
 // icon from the hashed name of its code ("\bse" is the A button), a controller's. With the keyboard's prompts the
-// code is blanked, so only the instruction's text shows, and display_menu.cpp gives it the key's name first
+// code is blanked, and the native text layout resolves its instruction template to the current binding
 X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_HINT_BEGIN));
 X86_FUNC(HULK_SUB_HINT_BEGIN) {
     uint32_t code = 0, original = 0;
@@ -117,6 +147,10 @@ X86_FUNC(HULK_SUB_HINT_BEGIN) {
         // instruction's text is drawn, and that carries the key. The scenario's own bytes are put back after the
         // call, which only hashes the name
         code = X86_MEM32(ctx.esp + 4);
+        const uint32_t instruction = X86_MEM32(ctx.esp + 8);
+        if (code && instruction) hulk::SetHudHintPrompt(
+            static_cast<const char*>(kernel::HostPtr(instruction)),
+            static_cast<const char*>(kernel::HostPtr(code)));
         if (code) {
             original = X86_MEM32(code);
             if ((original & 0xFF) == 0x08) {

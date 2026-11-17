@@ -9,13 +9,13 @@ float SanitizeMouseSensitivity(float value) {
 }
 
 void MouseLook::Reset() {
-    pending_x_ = pending_y_ = last_poll_ = next_sample_ = 0;
+    pending_x_ = pending_y_ = filtered_x_ = filtered_y_ = last_poll_ = next_sample_ = 0;
     sampled_ = false;
     cached_ = {};
 }
 void MouseLook::SetRawInputAvailable(bool available) {
     if (raw_input_ != available) {
-        pending_x_ = pending_y_ = 0;
+        pending_x_ = pending_y_ = filtered_x_ = filtered_y_ = 0;
         cached_ = {};
         // Discard the other source's motion without changing the elapsed-time baseline.
     }
@@ -38,22 +38,19 @@ void MouseLook::AddFallback(double dx, double dy) {
 
 MouseStick MouseLook::Step(double seconds, float sensitivity_x, float sensitivity_y, bool invert_y, bool smoothing) {
     if (!std::isfinite(seconds) || seconds <= 0) { Reset(); return {}; }
-    const auto axis = [seconds, smoothing](double& pending, float sensitivity) -> int16_t {
-        const double scale = SanitizeMouseSensitivity(sensitivity);
-        // Optional smoothing releases the SAME displacement over time, rather than adding a per-poll tail.
-        const double fraction = smoothing ? -std::expm1(-seconds / 0.025) : 1.0;
-        const double capacity = kCountsPerSecond * seconds / scale;
-        const double consumed = std::clamp(pending * fraction, -capacity, capacity);
-        pending -= consumed;  // preserve overflow instead of discarding counts at the stick cap
-        // End the exponential tail below a millionth of one device count.
-        if (std::abs(pending) < 1e-6) pending = 0;
-        if (std::abs(consumed) < 1e-6) return 0;
-        const double rate = std::clamp(std::abs(consumed) / capacity, 0.0, 1.0);
-        const int magnitude = std::clamp(int(std::lround(kDeadzone + (32767 - kDeadzone) * rate)), kDeadzone + 1, 32767);
-        return static_cast<int16_t>(consumed < 0 ? -magnitude : magnitude);
+    const auto axis = [seconds, smoothing](double& pending, double& filtered, float sensitivity) -> int16_t {
+        const double counts = pending;
+        pending = 0; // A mouse sample never queues overflow for a later camera update.
+        if (std::abs(counts) < 1e-6) { filtered = 0; return 0; }
+        const double rate = std::clamp(counts * SanitizeMouseSensitivity(sensitivity) /
+                                       (kCountsPerSecond * seconds), -1.0, 1.0);
+        if (rate * filtered < 0) filtered = 0;
+        filtered = smoothing ? filtered + (-std::expm1(-seconds / 0.025)) * (rate - filtered) : rate;
+        const int magnitude = std::clamp(int(std::lround(kDeadzone + (32767 - kDeadzone) * std::abs(filtered))), kDeadzone + 1, 32767);
+        return static_cast<int16_t>(filtered < 0 ? -magnitude : magnitude);
     };
-    cached_.x = axis(pending_x_, sensitivity_x);
-    cached_.y = axis(pending_y_, sensitivity_y);
+    cached_.x = axis(pending_x_, filtered_x_, sensitivity_x);
+    cached_.y = axis(pending_y_, filtered_y_, sensitivity_y);
     if (!invert_y) cached_.y = static_cast<int16_t>(-cached_.y);  // screen y is down, Xbox stick y is up
     return cached_;
 }

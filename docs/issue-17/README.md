@@ -1,4 +1,6 @@
-# Controls and Keybinds: test results
+# Controls and Keybinds: v0.5.0 test results
+
+These captures record v0.5.0. See [v0.5.1 verification](../v0.5.1/README.md) for the mouse-stop and live-hint fixes.
 
 Controls and Keybinds use the game's Dolly menu system in main-menu and pause-menu Options. They follow Display's `OnSelect gotoscreen` entry, fonts, background, selection bars and navigation. Sensitivity uses Audio Options' `AddHSlider`; prompts use `FEDialog` and `FEpopUp`.
 

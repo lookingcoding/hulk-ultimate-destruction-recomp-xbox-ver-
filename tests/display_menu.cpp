@@ -1,3 +1,5 @@
+#include "common/bindings.h"
+#include "common/binding_prompts.h"
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -84,11 +86,15 @@ static uint32_t U32(const std::vector<uint8_t>& b, size_t at) {
 
 static std::string Utf16(const std::vector<uint8_t>& b) {
     std::string s;
-    for (size_t i = 2; i + 1 < b.size(); i += 2) s += b[i + 1] ? '?' : char(b[i]);
+    std::u16string raw(reinterpret_cast<const char16_t*>(b.data() + 2), (b.size() - 2) / 2);
+    for (char16_t c : hulk::ExpandBindingPrompts(raw)) s += c > 127 ? '?' : char(c);
     return s;
 }
 
 int main(int argc, char** argv) {
+    hulk::SetHudHintPrompt("TBS_INSTRUCTION_JUMP_CITY", "se");
+    hulk::SetHudHintPrompt("TBS_INSTRUCTION_DROP", "us");
+    hulk::SetHudHintPrompt("TBS_INSTRUCTION_WEAPONIZE", "sp");
     const char* path = argc > 1 ? argv[1] : "assets/misc.rcf";
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -165,12 +171,12 @@ int main(int argc, char** argv) {
     Check(tables[0].find("press [Q] to pick it up") != std::string::npos && tables[0].find("\\bus") == std::string::npos &&
               tables[0].find("\\bmh Hulk") != std::string::npos,
           "keyboard prompts in place of the controller's");
-    Check(tables[0].find("Press [Space] to start the exercise") != std::string::npos, "the select button's prompt is the A button's key");
-    Check(tables[0].find("TBS_MENU_ITEM_PRESS_START2_XBOX\tPress Enter") != std::string::npos &&
+    Check(tables[0].find("Press [Space / Left Click] to start the exercise") != std::string::npos, "the select button's prompt is the A button's key");
+    Check(tables[0].find("TBS_MENU_ITEM_PRESS_START2_XBOX\tPress [Enter]") != std::string::npos &&
               tables[0].find("TBS_MENU_ITEM_PRESS_START3\tPress any key") != std::string::npos &&
-              tables[0].find("TBS_MENU_ITEM_PRESS_START\t[Space] Start") != std::string::npos,
+              tables[0].find("TBS_MENU_ITEM_PRESS_START\t[Space / Left Click] Start") != std::string::npos,
           "the title screen asks for Enter and any key, not START or a controller glyph");
-    Check(tables[0].find("TBS_INSTRUCTION_JUMP_CITY\t[Space] Jump to City") != std::string::npos &&
+    Check(tables[0].find("TBS_INSTRUCTION_JUMP_CITY\t[Space / Enter] Jump to City") != std::string::npos &&
               tables[0].find("TBS_INSTRUCTION_DROP\t[Q] Drop Item") != std::string::npos &&
               tables[0].find("TBS_INSTRUCTION_WEAPONIZE\t[E] Weaponize") != std::string::npos,
           "the HUD's hint lines name the key that does it");
@@ -291,6 +297,18 @@ int main(int argc, char** argv) {
     // the selectors' callbacks: registered after the game's own, then called with the selection
     std::vector<uint8_t> memory(0x100000);
     kernel::g_base = memory.data();
+    {
+        auto map = hulk::bindings::Defaults();
+        map.inputs[size_t(hulk::bindings::Action::MenuBack)] = {'K'};
+        hulk::bindings::Set(map);
+        hulk::MenuButtonPrompts(0x2000);
+        const auto* icon = reinterpret_cast<const char16_t*>(memory.data() + 0x2000 + 0x1884 + 0x80);
+        Check(hulk::ExpandBindingPrompts(std::u16string(icon)) == u"[K]", "native Back hint uses current binding immediately");
+        hulk::bindings::Reset();
+        hulk::MenuButtonPrompts(0x2000);
+        Check(hulk::ExpandBindingPrompts(std::u16string(icon)) == u"[Q]", "native Back hint returns to default immediately after reset");
+    }
+
     X86Context ctx{};
     ctx.esp = 0x80000;
     hulk::RegisterDisplayCallbacks(ctx);

@@ -27,6 +27,7 @@ public:
 private:
     void Add(double dx, double dy);
     double pending_x_ = 0, pending_y_ = 0;
+    double filtered_x_ = 0, filtered_y_ = 0;
     double last_poll_ = 0, next_sample_ = 0;
     bool sampled_ = false, raw_input_ = false;
     MouseStick cached_{};
