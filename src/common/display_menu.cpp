@@ -1,4 +1,5 @@
 #include "common/display_menu.h"
+#include "common/binding_prompts.h"
 #include "common/native_controls.h"
 #include "common/addresses.h"
 #include "common/cheats.h"
@@ -519,20 +520,20 @@ struct Prompt {
     const char* text[4];  // en and uk, fr, es, it
 };
 const Prompt kKeyboardPrompts[] = {
-    {"ju", {"[Space]", "[Espace]", "[Espacio]", "[Spazio]"}},                                       // A
-    {"us", {"[Q]", "[Q]", "[Q]", "[Q]"}},                                                         // B
-    {"at", {"[Left Click]", "[Clic gauche]", "[Clic izquierdo]", "[Clic sinistro]"}},             // X
-    {"sp", {"[E]", "[E]", "[E]", "[E]"}},                                                         // Y
-    {"ta", {"[Right Click]", "[Clic droit]", "[Clic derecho]", "[Clic destro]"}},                 // left trigger
-    {"ru", {"[Shift]", "[Maj]", "[Mayús]", "[Maiusc]"}},                                          // right trigger
-    {"la", {"[WASD]", "[WASD]", "[WASD]", "[WASD]"}},                                             // left stick
-    {"lr", {"[A/D]", "[A/D]", "[A/D]", "[A/D]"}},                                                 // left stick around
+    {"ju", {"{pc:jump}", "{pc:jump}", "{pc:jump}", "{pc:jump}"}},                                       // A
+    {"us", {"{pc:grab}", "{pc:grab}", "{pc:grab}", "{pc:grab}"}},                                                         // B
+    {"at", {"{pc:attack}", "{pc:attack}", "{pc:attack}", "{pc:attack}"}},             // X
+    {"sp", {"{pc:special}", "{pc:special}", "{pc:special}", "{pc:special}"}},                                                         // Y
+    {"ta", {"{pc:guard}", "{pc:guard}", "{pc:guard}", "{pc:guard}"}},                 // left trigger
+    {"ru", {"{pc:sprint}", "{pc:sprint}", "{pc:sprint}", "{pc:sprint}"}},                                          // right trigger
+    {"la", {"{pc:move}", "{pc:move}", "{pc:move}", "{pc:move}"}},                                             // left stick
+    {"lr", {"{pc:around}", "{pc:around}", "{pc:around}", "{pc:around}"}},                                                 // left stick around
     {"ra", {"[Mouse]", "[Souris]", "[Ratón]", "[Mouse]"}},                                        // right stick
-    {"se", {"[Space]", "[Espace]", "[Espacio]", "[Spazio]"}},                                       // A as select
-    {"jc", {"[Hold Space]", "[Maintenir Espace]", "[Mantener Espacio]", "[Tenere Spazio]"}},      // A held
-    {"uc", {"[Hold Q]", "[Maintenir Q]", "[Mantener Q]", "[Tenere Q]"}},                          // B held
-    {"ac", {"[Hold Left Click]", "[Maintenir clic gauche]", "[Mantener clic izquierdo]", "[Tenere clic sinistro]"}},  // X held
-    {"sc", {"[Hold E]", "[Maintenir E]", "[Mantener E]", "[Tenere E]"}},                          // Y held
+    {"se", {"{pc:menu_confirm}", "{pc:menu_confirm}", "{pc:menu_confirm}", "{pc:menu_confirm}"}},                                       // A as select
+    {"jc", {"{pc:hold_jump}", "{pc:hold_jump}", "{pc:hold_jump}", "{pc:hold_jump}"}},      // A held
+    {"uc", {"{pc:hold_grab}", "{pc:hold_grab}", "{pc:hold_grab}", "{pc:hold_grab}"}},                          // B held
+    {"ac", {"{pc:hold_attack}", "{pc:hold_attack}", "{pc:hold_attack}", "{pc:hold_attack}"}},  // X held
+    {"sc", {"{pc:hold_special}", "{pc:hold_special}", "{pc:hold_special}", "{pc:hold_special}"}},                          // Y held
 };
 
 // The same buttons in PlayStation (DualSense) wording, settings.toml's button_prompts = "playstation"
@@ -576,11 +577,11 @@ const Prompt kPlaystationMenuPrompts[] = {
 // keyboard.cpp's bindings (A and select are Space or Enter, START is Escape, so Enter starts the title and the
 // splash screen's "Press START" would name a button a keyboard has not got)
 const Text kKeyboardLines[] = {
-    {"TBS_MENU_ITEM_PRESS_START", {"[Space] Start", "[Espace] Start", "[Espacio] Start", "[Spazio] Start"}},
-    {"TBS_MENU_ITEM_PRESS_START2", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
-    {"TBS_MENU_ITEM_PRESS_START2_XBOX", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
-    {"TBS_MENU_ITEM_PRESS_START2_GC", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
-    {"TBS_MENU_ITEM_PRESS_START2_PS2", {"Press Enter", "Appuyez sur Entrée", "Pulse Intro", "Premi Invio"}},
+    {"TBS_MENU_ITEM_PRESS_START", {"{pc:menu_confirm} Start", "{pc:menu_confirm} Start", "{pc:menu_confirm} Start", "{pc:menu_confirm} Start"}},
+    {"TBS_MENU_ITEM_PRESS_START2", {"Press {pc:menu_select}", "Appuyez sur {pc:menu_select}", "Pulse {pc:menu_select}", "Premi {pc:menu_select}"}},
+    {"TBS_MENU_ITEM_PRESS_START2_XBOX", {"Press {pc:menu_select}", "Appuyez sur {pc:menu_select}", "Pulse {pc:menu_select}", "Premi {pc:menu_select}"}},
+    {"TBS_MENU_ITEM_PRESS_START2_GC", {"Press {pc:menu_select}", "Appuyez sur {pc:menu_select}", "Pulse {pc:menu_select}", "Premi {pc:menu_select}"}},
+    {"TBS_MENU_ITEM_PRESS_START2_PS2", {"Press {pc:menu_select}", "Appuyez sur {pc:menu_select}", "Pulse {pc:menu_select}", "Premi {pc:menu_select}"}},
     {"TBS_MENU_ITEM_PRESS_START3", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
     {"TBS_MENU_ITEM_PRESS_START3_XBOX", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
     {"TBS_MENU_ITEM_PRESS_START3_GC", {"Press any key", "Appuyez sur une touche", "Pulse una tecla", "Premi un tasto"}},
@@ -616,18 +617,7 @@ bool StartsWith(const std::u16string& key, const char* prefix) {
     return true;
 }
 
-// The HUD's mission hints (hud_triggerButtonHintBegin in the mission scenarios) draw a controller button's icon
-// and then the instruction text, which is one of these keys. Their scenarios use exactly three buttons: A
-// ("\bse": acquire, enter, hint, jump, mission select), Y ("\bsp": break free, hammer toss, weaponize) and
-// B ("\bus": drop); the icon is left out with the keyboard's prompts (hooks.cpp) and the key names the button
-// first, here, in the instruction's own line.
-const Text kHintKeys[] = {
-    {"TBS_INSTRUCTION_BREAK_FREE", {"[E] ", "[E] ", "[E] ", "[E] "}},
-    {"TBS_INSTRUCTION_HAMMERTOSS", {"[E] ", "[E] ", "[E] ", "[E] "}},
-    {"TBS_INSTRUCTION_WEAPONIZE", {"[E] ", "[E] ", "[E] ", "[E] "}},
-    {"TBS_INSTRUCTION_DROP", {"[Q] ", "[Q] ", "[Q] ", "[Q] "}},
-};
-
+// HUD keyboard hints resolve the action from hud_triggerButtonHintBegin's actual button code.
 // The same hints in the PlayStation's wording: the scenario's buttons are Y (Triangle) and B (Circle),
 // and the acquire/enter/jump hints' A is Cross
 const Text kPlaystationHints[] = {
@@ -637,14 +627,11 @@ const Text kPlaystationHints[] = {
     {"TBS_INSTRUCTION_DROP", {"[Circle] ", "[Rond] ", "[Círculo] ", "[Cerchio] "}},
 };
 
-const char* HintLabel(const std::u16string& key, int column, bool playstation) {
-    const Text* const table = playstation ? kPlaystationHints : kHintKeys;
-    const size_t count = playstation ? std::size(kPlaystationHints) : std::size(kHintKeys);
-    for (size_t i = 0; i < count; i++)
-        if (KeyIs(key, table[i].key)) return table[i].text[column];
-    static const char* const kSpace[4] = {"[Space] ", "[Espace] ", "[Espacio] ", "[Spazio] "};
-    static const char* const kCross[4] = {"[Cross] ", "[Croix] ", "[Cruz] ", "[Croce] "};
-    return playstation ? kCross[column] : kSpace[column];
+const char* PlaystationHintLabel(const std::u16string& key, int column) {
+    for (const Text& hint : kPlaystationHints)
+        if (KeyIs(key, hint.key)) return hint.text[column];
+    static const char* const cross[4] = {"[Cross] ", "[Croix] ", "[Cruz] ", "[Croce] "};
+    return cross[column];
 }
 
 // a string table's lines with each button prompt as its key, its press start lines in the keyboard's or the
@@ -671,7 +658,7 @@ std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column,
                     if (!KeyIs(line_key, lines[k].key)) continue;
                     AppendUtf16(out, lines[k].key);
                     AppendUtf16(out, "\t");
-                    AppendUtf16(out, lines[k].text[column]);
+                    AppendUtf16(out, BindingPromptTemplate(lines[k].text[column], column).c_str());
                     AppendUtf16(out, "\r\n");
                     line_end = end;
                     break;
@@ -683,7 +670,8 @@ std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column,
                     while (!rest.empty() && (rest.back() == u'\r' || rest.back() == u'\n')) rest.pop_back();
                     AppendUtf16(out, std::string(line_key.begin(), line_key.end()).c_str());
                     AppendUtf16(out, "\t");
-                    AppendUtf16(out, HintLabel(line_key, column, playstation));
+                    if (playstation) AppendUtf16(out, PlaystationHintLabel(line_key, column));
+                    else AppendUtf16(out, BindingPromptTemplate("{pc:hint:" + std::string(line_key.begin(), line_key.end()) + "} ", column).c_str());
                     for (char16_t c : rest) {
                         out.push_back(uint8_t(c));
                         out.push_back(uint8_t(c >> 8));
@@ -700,7 +688,7 @@ std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column,
             for (size_t k = 0; k < (playstation ? std::size(kPlaystationPrompts) : std::size(kKeyboardPrompts)); k++)
                 if (text[i + 2] == char16_t(prompts[k].code[0]) && text[i + 3] == char16_t(prompts[k].code[1])) p = &prompts[k];
             if (p) {
-                AppendUtf16(out, p->text[column]);
+                AppendUtf16(out, BindingPromptTemplate(p->text[column], column).c_str());
                 i += 3;
                 continue;
             }
@@ -904,7 +892,11 @@ void MenuButtonPrompts(uint32_t owner) {
         std::vector<uint8_t> text;
         if (controller) AppendUtf16(text, (std::string("") + kMenuPrompts[i].code).c_str());
         else if (playstation) AppendUtf16(text, kPlaystationMenuPrompts[i].text[column]);
-        else AppendUtf16(text, kMenuPrompts[i].text[column]);
+        else {
+            const char* actions[] = {"ms", "mb", "md"};
+            const auto token = BindingPromptTemplate("{pc:" + std::string(actions[i]) + "}", column);
+            AppendUtf16(text, token.c_str());
+        }
         text.push_back(0), text.push_back(0);
         if (void* icon = kernel::HostPtr(owner + kMenuIcons + i * kMenuIconSize); icon && text.size() <= kMenuIconSize)
             std::memcpy(icon, text.data(), text.size());

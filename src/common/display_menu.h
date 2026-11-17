@@ -19,7 +19,7 @@ std::shared_ptr<app::FileView> GameFileView(const std::string& path, uint64_t si
                                             const std::function<size_t(uint64_t, void*, size_t)>& read);
 
 // the button prompts the game reads from then on: a controller's icons, else the keyboard and mouse bindings. The
-// game reads its string tables as it loads, so a change shows from the next load
+// game reads device/language variants as it loads; keyboard binding labels resolve during native layout
 void SetControllerPrompts(bool controller);
 // true when the tables served are the controller's
 bool ControllerPrompts();

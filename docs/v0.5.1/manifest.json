@@ -1,0 +1,68 @@
+{
+  "safety": {
+    "Pid": 79348,
+    "Observations": 1459,
+    "VisibleOrForegroundViolations": 0,
+    "Seconds": 166.0647444,
+    "Audio": "samples discarded; no XAudio2 device",
+    "Input": "internal replay only"
+  },
+  "renderer": "EU game D3D11 final.bmp; direct PNG export, no redraw/crop",
+  "tests": "14/14 PASS; mouse and footer regressions failed before fix",
+  "native_footer": [
+    "Q",
+    "K",
+    "Q"
+  ],
+  "captures": 7,
+  "runtime_errors": 0,
+  "settings_after_reset": {
+    "menu_back": [
+      "Q",
+      "MouseRight"
+    ],
+    "jump": [
+      "Space",
+      "Enter"
+    ]
+  },
+  "source_sha256_normalized_LF": {
+    "src/common/mouse_look.cpp": "ef115a8200cd315b3d5cfa0670830e2ae67ddca0aa2683856957503b6e93420b",
+    "src/common/mouse_look.h": "59dc0768324c95281ceaaf511c999c09bf320ff7603be52bfe0dd8707ea579db",
+    "src/common/binding_prompts.cpp": "61a1dc2a0a3a8decfa45818406e20f6eda2407a5ab2457c430bd2ce4f41cb04f",
+    "src/common/binding_prompts.h": "0e686eaae9f70e69114ee44f32d09a6872634202f82491735b34158d3172f609",
+    "src/common/native_hints.cpp": "e0ff2609db014b1715b0d245016b3641d561c873c2e7375a6337dc2723b8b73c",
+    "src/common/native_hints.h": "5142e0213a584cc8fa34be0cdd21dd1d5f4b2f54ed22ec9e76df8af09a599c2a",
+    "src/common/display_menu.cpp": "90c5faaf567c6549e5ed61dd70f73af37d6adc208280be8c764b9da0b6593ad5",
+    "src/common/addresses.h": "11aaed1e037b43317d66bd9cb79cf8bd1088e0f525cbe5bac26edf7471bc132c",
+    "src/game/hooks.cpp": "de62266b97d3c13ac85501233009f8f53fb741bae5150003905f4f031bd61d72",
+    "tests/binding_prompts.cpp": "5391908241d03ad05fe11de10eb9172421d4b660d710d36dcc29574003394bc3",
+    "tests/mouse_look.cpp": "2690a1023e5d67641c5d08abca929d0215ce51cb29f6fc31e380c7231fc276b8",
+    "tests/display_menu.cpp": "9f5661474a575463220230040b05b2684400a30a7be1698843c2468b804567f3",
+    "tools/Test-NativeControls.ps1": "87cefc5f89d6eefc59ad4499b7590ca7e4a4821c821897a29771556a9e7d0cec",
+    "tests/fixtures/live-binding-hints.input": "a6fd41fdab68485ab25231d2062baf21e2af59aed76ead08feea075f66cd30da",
+    "CMakeLists.txt": "d244aeddb0c0deb06cb37befa09a8f04adb39e6d6f13ab79a20a3540d47c6c93",
+    "tools/Build.ps1": "07f515db86797f835467a682986cda78d3dc2408c25f637536867ad49e899d1c",
+    "src/common/display_menu.h": "31120b9a9847c1415877a0dea1fcadd8ce88bcb8ec63c42258d245a3ce378fd7"
+  },
+  "binaries_sha256": {
+    "HulkRecompiled.exe": "47fd15fccae15961d890a58be75f12cb2e8aea6057e8d393bdfaafb8f8076894",
+    "HulkRecompiled.dll": "4bfce4213f23329c98553b5b85d48a14b95601010f6c0744bba27acd7e389652",
+    "HulkRecompiledUSA.exe": "f0e4c3d19161d35bb9d027bf8aa7acd8d4961efd35e5e960eb8ab73cb8c715bf",
+    "HulkRecompiledUSA.dll": "491e05372e92a9363cd753efd661c3cd5a2c5fa2b377692985c106b2217d5656"
+  },
+  "images": {
+    "hint-before.png": {
+      "png_sha256": "8823b682e22efbbac24ed9a3425131b675821e57e28eba13db17dac4d9f52935",
+      "bmp_sha256": "b53b661d62a1567cc302f130795633f6bf8c4138612ab186b9cd28b664c444cd"
+    },
+    "hint-after.png": {
+      "png_sha256": "e36900be0e5be5eccafe2cfd44ddedf696614daf5e2720339637475f135b2475",
+      "bmp_sha256": "99e5685bcc44d5fe363fd1af5a9fc25e3039eed6ee0f085ed415c3906f7c4671"
+    },
+    "hint-reset.png": {
+      "png_sha256": "bba574a63203b569ed8975247ac2050bf6fdcc041e40a91b24eef43924a0ae7e",
+      "bmp_sha256": "990411917d033f68a6e0e5e5fdad149c324301a45ed748aa22d5579428fc3f7b"
+    }
+  }
+}

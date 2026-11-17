@@ -83,19 +83,6 @@ void TestMotion() {
                 "slightly-fast display does not halve mouse update cadence");
         }
     }
-    for (bool smoothing : {false, true}) {
-        MouseLook motion;
-        motion.AddRaw(1000, -500);
-        double x = 0, y = 0;
-        for (int i = 0; i < 180; ++i) {
-            const auto stick = motion.Step(dt, 1, 2, false, smoothing);
-            x += Counts(stick.x, dt); y += Counts(stick.y, dt);
-        }
-        Near(x, 1000, .04, "large swipe retains horizontal overflow at cap");
-        Near(y, 1000, .04, "independent vertical scale preserves displacement at cap");
-        const auto idle = motion.Step(dt, 1, 2, false, smoothing);
-        Check(!idle.x && !idle.y, "smoothing and overflow tails terminate");
-    }
     MouseLook motion;
     motion.AddRaw(1, 1);
     auto s = motion.Step(dt, 1, 2, false, false);
@@ -155,6 +142,31 @@ void TestSourcesAndBounds() {
         Check(!s.x && !s.y, "nonpositive/nonfinite step returns neutral");
     }
 }
+void TestImmediateStop() {
+    using hulk::MouseLook;
+    for (bool smoothing : {false, true}) for (int hz : {30, 60, 120, 240}) {
+        MouseLook motion;
+        const double dt = 1.0 / hz;
+        motion.AddRaw(10000, -10000);
+        const auto swipe = motion.Step(dt, 1, 1, false, smoothing);
+        Check(swipe.x != 0 && swipe.y != 0, "fast swipe produces mouse look");
+        motion.AddRaw(0, 1);
+        const auto one_axis = motion.Step(dt, 1, 1, false, smoothing);
+        Check(!one_axis.x && one_axis.y < 0, "stopped axis is neutral while the other axis moves");
+        for (int i = 0; i < 20; ++i) {
+            const auto stopped = motion.Step(dt, 1, 1, false, smoothing);
+            Check(!stopped.x && !stopped.y, "no mouse overflow or smoothing rotation after swipe stops");
+        }
+        MouseLook polled;
+        polled.AddRaw(10000, -10000);
+        polled.Poll(100, 1, 1, false, smoothing);
+        const auto idle = polled.Poll(100 + MouseLook::kSampleSeconds, 1, 1, false, smoothing);
+        Check(!idle.x && !idle.y, "saturated cached poll becomes neutral at the next sample");
+        motion.AddRaw(-1, 1);
+        const auto reverse = motion.Step(dt, 1, 1, false, smoothing);
+        Check(reverse.x < 0 && reverse.y < 0, "small reverse swipe is not swallowed by old motion");
+    }
+}
 void TestSettings() {
     using namespace hulk;
     SetMouseSensitivity(1);
@@ -204,10 +216,19 @@ void TestLifecycle() {
     Check(physical.rx == 1234 && physical.ry == -2345, "idle mouse preserves physical right stick");
     move(); message(WM_KILLFOCUS); message(WM_SETFOCUS);
     p = poll(); Check(!p.rx && !p.ry, "focus cycle clears movement queued without a poll");
+    message(WM_KILLFOCUS); message(WM_SETFOCUS);
+    message(WM_MOUSEMOVE, MAKELPARAM(0, 0)); message(WM_MOUSEMOVE, MAKELPARAM(30000, 30000));
+    p = poll(); Check(p.rx == 32767 && p.ry == -32767, "large fallback swipe saturates this mouse sample");
+    Sleep(20);
+    physical.rx = 1234; physical.ry = -2345; physical.buttons = 0x80; physical.analog[6] = 170;
+    KeyboardPad(0, physical);
+    Check(physical.rx == 1234 && physical.ry == -2345 && physical.buttons == 0x80 && physical.analog[6] == 170,
+          "controller stick/buttons survive mouse stop with no queued mouse rotation");
+
 }
 }
 int main() {
-    TestMotion(); TestSourcesAndBounds(); TestSettings(); TestLifecycle();
+    TestMotion(); TestSourcesAndBounds(); TestImmediateStop(); TestSettings(); TestLifecycle();
     if (!failures) std::puts("Mouse displacement bridge, settings migration and focus/menu lifecycle passed.");
     return failures ? 1 : 0;
 }

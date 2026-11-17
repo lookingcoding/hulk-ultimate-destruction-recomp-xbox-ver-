@@ -22,9 +22,9 @@ The game checks your disc image when it starts and tells you if it can't use it.
 
 - **Mouse camera controls:**
   - Windows Raw Input (`WM_INPUT`), with cursor-delta fallback when raw input is unavailable.
-  - Mouse input accounts for elapsed time and the camera deadzone. Extra input polls do not repeat movement; motion above the stick limit is carried forward.
+  - Mouse input accounts for elapsed time and the camera deadzone. Extra input polls do not repeat movement. Motion above the stick limit is discarded; mouse input stops at the next sample when the mouse stops.
   - Independent X/Y sensitivity sliders and vertical inversion in **Options > Controls / Keybinds**.
-  - The game's native camera still limits turning speed and acceleration. The camera may keep moving briefly after a fast swipe.
+  - Fast swipes do not queue rotation or smoothing after movement stops. Controller/stick behavior is unchanged.
 - **Direct Mouse Hit-Testing & Menu Navigation:**
   - Hovering a menu row or tab highlights it and clicking selects it. The port reads the game's real highlighted row and steps the D-pad until it matches the one under the pointer, so greyed-out rows, wrapping and every list length work.
   - Clicking a tab (Options / Story Mode / Extras) from inside a list goes back and opens that tab. Clicking or scrolling on a selector changes its value.
@@ -76,7 +76,7 @@ mouse_invert_y = false
 mouse_smoothing = false
 ```
 
-The older `mouse_sensitivity` value initializes both axes; explicit X/Y values override it. Existing game tooltips and mission hints continue to show the default keys.
+The older `mouse_sensitivity` value initializes both axes; explicit X/Y values override it. Game hints update after rebinding or resetting without restarting. Full hints show primary and alternate inputs; compact menu footers show the primary key. Controller and PlayStation prompts retain their button labels.
 
 Bindings are stored in the `[bindings]` table of `game/settings.toml`. Each action accepts a name or an array of names. `[]` or `"unbound"` disables an action. Missing or invalid entries use that action's defaults; an invalid array falls back as a whole. Names are case-insensitive, including letters, digits, F1-F24, arrows, Space, Enter, Escape, Tab, Delete, Shift/Ctrl/Alt and their Left/Right variants, Num0-Num9, MouseLeft/MouseRight/MouseMiddle/MouseX1/MouseX2, and WheelUp/Down/Left/Right.
 

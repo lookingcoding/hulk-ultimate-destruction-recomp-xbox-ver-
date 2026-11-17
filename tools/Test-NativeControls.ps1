@@ -3,13 +3,14 @@ param(
  [string]$GameAssets=(Join-Path (Split-Path $PSScriptRoot -Parent) 'assets'),
  [string]$Work='D:\Projects\Build Cache\Hulk Recompiled\Native Controls Proof',
  [ValidateSet('HulkRecompiled','HulkRecompiledUSA')][string]$Image='HulkRecompiled',
- [ValidateRange(164,180)][int]$Seconds=166
+ [string]$Replay=(Join-Path (Split-Path $PSScriptRoot -Parent) 'tests/fixtures/native-controls.input'),
+ [ValidateRange(164,300)][int]$Seconds=166
 )
 $ErrorActionPreference='Stop'
 $env:TEMP='D:\Projects\Build Cache\Temp'
 New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
 $env:TMP=$env:TEMP
-foreach($path in @($Build,$GameAssets,$Work)) {
+foreach($path in @($Build,$GameAssets,$Work,$Replay)) {
  if(![IO.Path]::GetFullPath($path).StartsWith('D:\',[StringComparison]::OrdinalIgnoreCase)){throw 'All fixture paths must be on D:'}
 }
 $runDir=Join-Path $Work (Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -34,7 +35,7 @@ $fixtureVariables=@('HULK_BACKGROUND_TEST','HULK_TEST_INPUT','XBE_RENDERER','XBE
 $previousEnvironment=@{}
 foreach($name in $fixtureVariables){$previousEnvironment[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 $env:HULK_BACKGROUND_TEST='1'
-Copy-Item -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'tests/fixtures/native-controls.input') -Destination "$runDir\controls.input"
+Copy-Item -LiteralPath $Replay -Destination "$runDir\controls.input"
 $env:HULK_TEST_INPUT="$runDir\controls.input"
 $env:XBE_RENDERER='d3d11'
 $env:XBE_CAPTURE_DIR="$runDir\captures"
