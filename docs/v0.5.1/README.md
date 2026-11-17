@@ -10,6 +10,7 @@ EU and USA executables/DLLs build. All **14 CTest tests pass**.
 
 - Mouse regressions cover saturated swipes, both axes, immediate idle, reversal, 30/60/120/240 Hz, smoothing on/off, repeated polls, and physical controller input after the mouse stops.
 - Hint tests cover all 28 actions/four language columns, alternate/unbound keys, held and movement hints, actual HUD button codes, the same cached text after rebind/reset, native wrapping-cache invalidation, guest allocation/deletion, and native draw arguments/stack restoration.
+- Archive tests rebind camera reset to F and target cycling to T, then check their help/tutorial text. Word-only targeting and charged-jump instructions also name the bound keys.
 - Existing input, settings, menu/archive, cheat and screen-lifecycle tests still pass.
 
 The mouse and default-key footer regressions failed before the fix. A first live run caught an additional cached-footer case; the regression now reuses the same footer across rebind/reset rather than rebuilding it.
@@ -26,7 +27,7 @@ The bottom hint returns to Q after resetting bindings:
 
 ![Native Back hint after reset](hint-reset.png)
 
-The 166-second run produced seven renderer captures, **1,459 visibility/foreground checks with zero violations**, and no runtime errors. Audio samples were discarded without creating an XAudio2 device. Final TOML values were `menu_back = ['Q', 'MouseRight']` and `jump = ['Space', 'Enter']`.
+The 166-second run produced seven renderer captures, **1,425 visibility/foreground checks with zero violations**, and no runtime errors. Audio samples were discarded without creating an XAudio2 device. Final TOML values were `menu_back = ['Q', 'MouseRight']` and `jump = ['Space', 'Enter']`.
 
 Images are direct PNG exports of the game's D3D11 `final.bmp` frames, without cropping or redrawing. [Source, binary and image hashes](manifest.json) identify the tested files.
 

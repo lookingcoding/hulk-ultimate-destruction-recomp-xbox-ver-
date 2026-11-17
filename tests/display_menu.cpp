@@ -95,6 +95,10 @@ int main(int argc, char** argv) {
     hulk::SetHudHintPrompt("TBS_INSTRUCTION_JUMP_CITY", "se");
     hulk::SetHudHintPrompt("TBS_INSTRUCTION_DROP", "us");
     hulk::SetHudHintPrompt("TBS_INSTRUCTION_WEAPONIZE", "sp");
+    auto context_map = hulk::bindings::Defaults();
+    context_map.inputs[size_t(hulk::bindings::Action::ResetCamera)] = {'F'};
+    context_map.inputs[size_t(hulk::bindings::Action::White)] = {'T'};
+    hulk::bindings::Set(context_map);
     const char* path = argc > 1 ? argv[1] : "assets/misc.rcf";
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -167,6 +171,14 @@ int main(int argc, char** argv) {
         Check(t.find("TBS_MENU_ITEM_OM_CAMERA_OPTIONS\t") != std::string::npos, "string tables keep their own");
     }
     Check(tables.size() == 1 || french_cheats, "the cheats' lines in each language");
+    Check(tables[0].find("TBS_HINT_CAMERAS_2\tPress [F] to reset the camera") != std::string::npos,
+          "camera reset hint uses its rebound action rather than generic mouse look");
+    Check(tables[0].find("using [T] to cycle to the next available target") != std::string::npos &&
+          tables[0].find("Then use [T] to switch targets") != std::string::npos,
+          "target cycling hint uses its rebound action rather than generic mouse look");
+    Check(tables[0].find("TBS_HINT_TARGETING_3\t[Right Click] Using the target button") != std::string::npos &&
+          tables[0].find("TBS_HINT_C2M3_3\t[Hold Space / Enter]") != std::string::npos,
+          "word-only targeting and charged-jump instructions also identify the current bindings");
     // without a controller the prompts are the keyboard's; the map legend's icons stay
     Check(tables[0].find("press [Q] to pick it up") != std::string::npos && tables[0].find("\\bus") == std::string::npos &&
               tables[0].find("\\bmh Hulk") != std::string::npos,

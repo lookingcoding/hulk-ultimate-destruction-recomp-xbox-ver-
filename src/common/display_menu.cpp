@@ -617,6 +617,10 @@ bool StartsWith(const std::u16string& key, const char* prefix) {
     return true;
 }
 
+bool KeyOrVariant(const std::u16string& key, const char* root) {
+    return KeyIs(key, root) || StartsWith(key, (std::string(root) + "_").c_str());
+}
+
 // HUD keyboard hints resolve the action from hud_triggerButtonHintBegin's actual button code.
 // The same hints in the PlayStation's wording: the scenario's buttons are Y (Triangle) and B (Circle),
 // and the acquire/enter/jump hints' A is Cross
@@ -663,6 +667,31 @@ std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column,
                     line_end = end;
                     break;
                 }
+                if (!line_end && !playstation) {
+                    const bool reset_camera = KeyOrVariant(line_key, "TBS_HINT_CAMERAS_2");
+                    const bool targeting = KeyOrVariant(line_key, "TBS_HINT_TARGETING_3") || KeyOrVariant(line_key, "TBS_HINT_TARGETING_4");
+                    const bool charge_jump = KeyOrVariant(line_key, "TBS_HINT_C2M3_3");
+                    if (reset_camera || targeting || charge_jump) {
+                        AppendUtf16(out, std::string(line_key.begin(), line_key.end()).c_str());
+                        AppendUtf16(out, "\t");
+                        if (reset_camera) {
+                            static const char* reset[] = {
+                                "Press {pc:reset_camera} to reset the camera to the default position.",
+                                "Appuyez sur {pc:reset_camera} pour recentrer la cam\u00e9ra.",
+                                "Pulsa {pc:reset_camera} para centrar la c\u00e1mara.",
+                                "Premi {pc:reset_camera} per reimpostare la telecamera."
+                            };
+                            AppendUtf16(out, BindingPromptTemplate(reset[column], column).c_str());
+                            AppendUtf16(out, "\r\n");
+                        } else {
+                            AppendUtf16(out, BindingPromptTemplate(targeting ? "{pc:guard} " : "{pc:hold_jump} ", column).c_str());
+                            for (size_t j = tab + 1; j < end; ++j) {
+                                out.push_back(uint8_t(text[j])); out.push_back(uint8_t(text[j] >> 8));
+                            }
+                        }
+                        line_end = end;
+                    }
+                }
                 if (!line_end && StartsWith(line_key, "TBS_INSTRUCTION_")) {
                     // the HUD's hint text: the key that does it, then the instruction as the game wrote it
                     const size_t from = tab + 1;
@@ -688,7 +717,9 @@ std::vector<uint8_t> KeyboardPrompts(const std::vector<uint8_t>& in, int column,
             for (size_t k = 0; k < (playstation ? std::size(kPlaystationPrompts) : std::size(kKeyboardPrompts)); k++)
                 if (text[i + 2] == char16_t(prompts[k].code[0]) && text[i + 3] == char16_t(prompts[k].code[1])) p = &prompts[k];
             if (p) {
-                AppendUtf16(out, BindingPromptTemplate(p->text[column], column).c_str());
+                const char* label = !playstation && (KeyOrVariant(line_key, "TBS_HINT_TARGETING_7") || KeyOrVariant(line_key, "TBS_C0M1_TEXT_41")) && std::strcmp(p->code, "ra") == 0
+                    ? "{pc:white}" : p->text[column];
+                AppendUtf16(out, BindingPromptTemplate(label, column).c_str());
                 i += 3;
                 continue;
             }
