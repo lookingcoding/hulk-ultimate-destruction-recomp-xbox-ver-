@@ -1,0 +1,174 @@
+diff --git a/runtime/gpu/d3d11.cpp b/runtime/gpu/d3d11.cpp
+--- a/runtime/gpu/d3d11.cpp
++++ b/runtime/gpu/d3d11.cpp
+@@ -1450,7 +1450,7 @@
+     tx.swap = nullptr;
+     uint64_t key = texturedumper::Key(d, fi, p, colours);
+     texturedumper::Dump(key, d, p, colours);
+-    tx.pack_key = texturedumper::Replacing() ? key : 0;
++    tx.pack_key = texturedumper::ReplacementKey(key, d, p);
+ }
+ 
+ void D3D11Backend::LatchPackImage(Tex& tx) {
+diff --git a/runtime/gpu/d3d12.cpp b/runtime/gpu/d3d12.cpp
+--- a/runtime/gpu/d3d12.cpp
++++ b/runtime/gpu/d3d12.cpp
+@@ -1906,8 +1906,7 @@
+     tx.swap = nullptr;
+     uint64_t key = texturedumper::Key(d, fi, p, colours);
+     texturedumper::Dump(key, d, p, colours);
+-    // dumping alone keys the bytes too: the pack image is not drawn then
+-    tx.pack_key = texturedumper::Replacing() ? key : 0;
++    tx.pack_key = texturedumper::ReplacementKey(key, d, p);
+ }
+ 
+ // the pack image for tx's bytes once it has loaded; textures with the same bytes share its GPU copy
+diff --git a/runtime/gpu/texturedumper.cpp b/runtime/gpu/texturedumper.cpp
+--- a/runtime/gpu/texturedumper.cpp
++++ b/runtime/gpu/texturedumper.cpp
+@@ -44,6 +44,10 @@
+ constexpr uint32_t kMaxSide = 16384;  // D3D12's 2D texture limit
+ constexpr uint32_t kDumpDds = 1;      // texture_dump_format
+ constexpr size_t kPaletteBytes = 256 * 4;
++constexpr uint64_t kCanyonRock = 0x0CD1747BDF881648;
++constexpr uint64_t kCanyonSand = 0x0D20E1ACCF322BC3;
++// The generated chain and an installed replacement for the same texture have separate GPU cache keys.
++constexpr uint64_t kCanyonMipKeyMask = 0x7B93129C9A48B769;
+ constexpr auto kSettle = std::chrono::milliseconds(500);  // files still being copied in
+ constexpr uint32_t kWatchRetry = 120;  // presents between tries while the pack folder is missing
+ constexpr DWORD kPackChanges = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
+@@ -455,6 +459,11 @@
+ 
+ // Loading
+ 
++void StoreLoaded(uint64_t key, uint32_t revision, std::optional<Image> image) {
++    std::lock_guard l(g.lock);
++    if (revision == g.revision) g.loaded[key] = std::move(image);
++}
++
+ void Load(uint64_t key, const fs::path& path, uint32_t revision) {
+     Image img;
+     bool dds = _wcsicmp(path.extension().c_str(), L".dds") == 0;
+@@ -466,13 +475,7 @@
+     } else {
+         LOGE("texture pack: %s did not load", Utf8(path).c_str());
+     }
+-    std::lock_guard l(g.lock);
+-    if (revision != g.revision) return;
+-    if (ok) {
+-        g.loaded[key] = std::move(img);
+-    } else {
+-        g.loaded[key] = std::nullopt;
+-    }
++    StoreLoaded(key, revision, ok ? std::optional<Image>(std::move(img)) : std::nullopt);
+ }
+ 
+ Image Decode(const TextureDesc& d, const uint8_t* guest, const uint32_t* palette) {
+@@ -486,6 +489,31 @@
+         DecodeLevel(d, l, 0, guest, palette, level.px, level.pitch);
+     }
+     return img;
++}
++
++bool CanyonMipCandidate(const TextureDesc& d) {
++    return d.format == 0x0C && d.width == 128 && d.height == 128 && d.levels == 1;
++}
++
++bool CanyonTerrainKey(uint64_t key) { return key == kCanyonRock || key == kCanyonSand; }
++
++void GenerateCanyonMipmaps(uint64_t key, uint32_t revision, Image img) {
++    IWICImagingFactory* wic = Wic();
++    std::vector<uint8_t> dds;
++    ComPtr<IWICBitmapSource> bgra;
++    Level top{std::vector<uint8_t>(size_t(img.width) * img.height * 4), img.width * 4};
++    if (!wic || FAILED(LevelZeroBitmap(wic, img, dds, bgra)) ||
++        FAILED(bgra->CopyPixels(nullptr, top.pitch, UINT(top.px.size()), top.px.data()))) {
++        LOGE("texture: could not generate canyon mipmaps");
++        StoreLoaded(key, revision, std::nullopt);
++        return;
++    }
++    img.format = DXGI_FORMAT_B8G8R8A8_UNORM;
++    img.levels[0] = std::move(top);
++    AddMipmaps(img);
++    LOGI("texture: generated %zu canyon mip levels for %016llX", img.levels.size(),
++         static_cast<unsigned long long>(key ^ kCanyonMipKeyMask));
++    StoreLoaded(key, revision, std::move(img));
+ }
+ 
+ // the settings into g.set; false when none changed
+@@ -554,13 +582,33 @@
+ bool Replacing() { return g.set.replacing && !g.files.empty(); }
+ 
+ uint64_t Key(const TextureDesc& d, const FormatInfo& fi, const uint8_t* guest, const uint32_t* palette) {
+-    if (!Replacing() && !g.set.dumping) return 0;
++    const bool packOrDump = Replacing() || g.set.dumping;
++    if (!packOrDump && !CanyonMipCandidate(d)) return 0;
+     // cube maps, volumes and depth stay the console's; linear ones are movie frames and the game's own copies
+     if (d.cube || d.depth > 1 || d.linear || UploadFormat(fi.host) == DXGI_FORMAT_UNKNOWN) return 0;
+     uint32_t shape[] = {d.format, d.width, d.height};
+     uint64_t key = Hash(guest, LevelSize(d, 0), Hash(shape, sizeof(shape)));
+     if (palette) key = Hash(palette, kPaletteBytes, key);
++    if (!packOrDump && !CanyonTerrainKey(key)) return 0;
+     return key ? key : 1;
++}
++
++uint64_t ReplacementKey(uint64_t key, const TextureDesc& d, const uint8_t* guest) {
++    if (g.set.replacing && g.files.contains(key)) return key;
++    if (!CanyonTerrainKey(key) || !CanyonMipCandidate(d)) return 0;
++
++    // Snapshot the compressed bytes before posting work. The guest can reuse the texture memory.
++    const uint64_t generated = key ^ kCanyonMipKeyMask;
++    uint32_t revision;
++    {
++        std::lock_guard l(g.lock);
++        if (!g.asked.insert(generated).second) return generated;
++        revision = g.revision;
++    }
++    Post([generated, revision, image = Decode(d, guest, nullptr)]() mutable {
++        GenerateCanyonMipmaps(generated, revision, std::move(image));
++    });
++    return generated;
+ }
+ 
+ void Dump(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32_t* palette) {
+@@ -582,7 +630,8 @@
+ 
+ Lookup Take(uint64_t key, Image& out) {
+     auto file = g.files.find(key);
+-    if (!g.set.replacing || file == g.files.end()) return Lookup::None;
++    const bool custom = g.set.replacing && file != g.files.end();
++    if (!custom && !CanyonTerrainKey(key ^ kCanyonMipKeyMask)) return Lookup::None;
+     uint32_t revision = 0;
+     {
+         std::lock_guard l(g.lock);
+@@ -593,6 +642,7 @@
+             g.loaded.erase(it);
+             return Lookup::Ready;
+         }
++        if (!custom) return g.asked.contains(key) ? Lookup::Loading : Lookup::None;
+         if (!g.asked.insert(key).second) return Lookup::Loading;
+         revision = g.revision;
+     }
+diff --git a/runtime/gpu/texturedumper.h b/runtime/gpu/texturedumper.h
+--- a/runtime/gpu/texturedumper.h
++++ b/runtime/gpu/texturedumper.h
+@@ -35,14 +35,17 @@
+ // replacement on and the pack holds images
+ bool Replacing();
+ 
+-// the name of a texture's bytes, a P8 texture's with its 256 colours; 0 when neither the pack nor dumping applies
++// The name of a texture's bytes, including the palette for P8 textures. Zero if unused.
+ uint64_t Key(const TextureDesc& d, const FormatInfo& fi, const uint8_t* guest, const uint32_t* palette);
++
++// Prefer an installed pack image, otherwise generate mipmaps for the known canyon terrain textures.
++uint64_t ReplacementKey(uint64_t key, const TextureDesc& d, const uint8_t* guest);
+ 
+ // once per key while dumping: PNG level 0, or DDS with every level in the format the renderer uploads
+ void Dump(uint64_t key, const TextureDesc& d, const uint8_t* guest, const uint32_t* palette);
+ 
+ // Ready moves the image into out; the first ask starts loading it off the calling thread.
+-// None: replacement off, no pack image for key, or its file did not load
++// None: no replacement for the key, or it failed to load
+ Lookup Take(uint64_t key, Image& out);
+ 
+ }  // namespace gpu::texturedumper
