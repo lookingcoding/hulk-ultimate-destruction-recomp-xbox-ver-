@@ -16,6 +16,8 @@ A native Windows port and static recompilation of the original Xbox version of *
 
 The game checks your disc image when it starts and tells you if it can't use it. The first launch builds the game's code from your disc with the included `compiler` folder, which takes a few minutes and needs about 1 GB of free space; later launches start straight away.
 
+To try an original Xbox save, close the port, back up `game\hdd\E\UDATA\56550039` if it exists, and copy the Xbox's `E:\UDATA\56550039` folder into `game\hdd\E\UDATA\`. Keep the save slot folders intact and avoid overwriting any existing slots. Then open **Story Mode → Load Game**. The signature check has been tested with a retail-signed fixture. A save copied from a physical Xbox has yet to be verified.
+
 ---
 
 ## Features & Improvements

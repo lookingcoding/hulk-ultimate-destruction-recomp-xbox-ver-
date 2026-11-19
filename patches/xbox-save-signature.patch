@@ -1,0 +1,35 @@
+diff --git a/runtime/kernel/xboxkrnl.cpp b/runtime/kernel/xboxkrnl.cpp
+index bec6e36..4847099 100644
+--- a/runtime/kernel/xboxkrnl.cpp
++++ b/runtime/kernel/xboxkrnl.cpp
+@@ -78,7 +78,30 @@ uint64_t InterruptTime() {
+ uint32_t g_tick_count_va = 0;
+ uint32_t g_launch_data_page_va = 0;
+ 
++static void InitTitleSignatureKey(const xbe::Image& image) {
++    constexpr size_t kSignatureOffset = 0xC0;
++    constexpr size_t kKeySize = 16;
++    constexpr size_t kRequiredSize = kSignatureOffset + kKeySize;
++    if (image.cert < image.base) return;
++    const size_t offset = image.cert - image.base;
++    if (offset > image.header_size || image.header_size - offset < kRequiredSize ||
++        offset > image.file.size() || image.file.size() - offset < kRequiredSize ||
++        image.U32(uint32_t(offset)) < kRequiredSize) return;
++
++    // Retail Xbox kernels expose the first 16 bytes of the HMAC of the XBE certificate's signature field.
++    constexpr uint8_t kRetailCertificateKey[kKeySize] = {
++        0x5C, 0x07, 0x33, 0xAE, 0x04, 0x01, 0xF7, 0xE8,
++        0xBA, 0x79, 0x93, 0xFD, 0xCD, 0x2F, 0x1F, 0xE0,
++    };
++    if (image.debug) return;
++    uint8_t digest[20];
++    crypto::Hmac(kRetailCertificateKey, kKeySize, image.file.data() + offset + kSignatureOffset,
++                 kKeySize, nullptr, 0, digest);
++    std::memcpy(HostPtr(DataAddress(325)), digest, kKeySize);
++}
++
+ void InitKernelData() {
++    if (g_image) InitTitleSignatureKey(*g_image);
+     g_tick_count_va = DataAddress(156);
+     g_launch_data_page_va = DataAddress(164);
+     W32(DataAddress(164), 0);
