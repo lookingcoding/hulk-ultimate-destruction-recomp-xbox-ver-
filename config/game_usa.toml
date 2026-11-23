@@ -24,6 +24,11 @@ data_ranges = [[0x346AFC, 0x346B04]] # "20XC00\0\0" signature preceding _except_
 at = 0x353BBF # EU 0x34F48F
 end = 0x353C19
 
+[[hook]]
+at = 0x3B995
+call = "HasNoActorUpdateOwner"
+on_true = 0x3BA1D
+
 # functions the host replaces or calls by name, 0 where the image has none
 [symbols]
 _CIacos                                              = 0x3441F0

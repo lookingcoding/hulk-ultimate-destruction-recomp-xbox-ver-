@@ -26,6 +26,12 @@
 #include "kernel/kernel.h"
 #include "xdk/hle.h"
 
+// Callbacks during the actor update can clear its owner after the initial check.
+// Skip the owner's optional attachment lookup and finish the guest's cleanup.
+bool HasNoActorUpdateOwner(X86Context& ctx, uint8_t*) {
+    return ctx.eax == 0;
+}
+
 // the frontend's callbacks object (thiscall, owner; ret 4): registers each function the FE scripts name, then the
 // display options' selectors (display_menu.cpp)
 X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_FE_CALLBACKS));
