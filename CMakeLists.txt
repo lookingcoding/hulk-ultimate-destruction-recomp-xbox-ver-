@@ -100,6 +100,19 @@ foreach(region IN ITEMS eu usa)
     add_test(NAME live_binding_hints_${region} COMMAND hulk_hint_${region}_tests)
 endforeach()
 
+# the actor update's owner guard, against both regions' configs
+foreach(region IN ITEMS eu usa)
+    add_executable(hulk_owner_guard_${region}_tests tests/actor_owner_guard.cpp)
+    target_include_directories(hulk_owner_guard_${region}_tests PRIVATE src)
+    target_link_libraries(hulk_owner_guard_${region}_tests PRIVATE tomlplusplus::tomlplusplus)
+    set(region_config ${CMAKE_CURRENT_SOURCE_DIR}/config/game.toml)
+    if(region STREQUAL "usa")
+        target_compile_definitions(hulk_owner_guard_${region}_tests PRIVATE HULK_USA=1)
+        set(region_config ${CMAKE_CURRENT_SOURCE_DIR}/config/game_usa.toml)
+    endif()
+    add_test(NAME actor_owner_guard_${region} COMMAND hulk_owner_guard_${region}_tests ${region_config})
+endforeach()
+
 file(GLOB XBE_HOST_SOURCES CONFIGURE_DEPENDS src/*/*.cpp)
 list(FILTER XBE_HOST_SOURCES EXCLUDE REGEX "/src/game(_usa)?/")
 

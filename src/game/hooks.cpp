@@ -9,7 +9,9 @@
 #include <bit>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
+#include "common/actor_owner_guard.h"
 #include "common/addresses.h"
 #include "common/camera.h"
 #include "common/cheats.h"
@@ -26,10 +28,29 @@
 #include "kernel/kernel.h"
 #include "xdk/hle.h"
 
-// Callbacks during the actor update can clear its owner after the initial check.
-// Skip the owner's optional attachment lookup and finish the guest's cleanup.
-bool HasNoActorUpdateOwner(X86Context& ctx, uint8_t*) {
-    return ctx.eax == 0;
+// Callbacks during the actor update can clear its owner after the initial check. Skip the owner's optional
+// attachment lookup and finish the guest's cleanup, only when the owner the guest is about to read through is null:
+// the plan comes from the guest's own instructions at the hook site (common/actor_owner_guard.h), not from eax.
+bool HasNoActorUpdateOwner(X86Context& ctx, uint8_t* base) {
+    static const hulk::OwnerGuardPlan plan = [base] {
+        const uint8_t* code = base + hulk::addr::kActorOwnerGuard;
+        const hulk::OwnerGuardPlan p = hulk::PlanOwnerGuard(code, 16);
+        char bytes[16 * 3 + 1] = {};
+        for (int i = 0; i < 16; ++i) std::snprintf(bytes + i * 3, 4, "%02X ", code[i]);
+        static constexpr const char* kRules[] = {"unknown, testing eax", "owner register", "owner load"};
+        if (p.rule == hulk::OwnerGuardRule::Unknown)
+            LOGW("actor owner guard: %08X %s: %s", hulk::addr::kActorOwnerGuard, bytes, kRules[0]);
+        else
+            LOGI("actor owner guard: %08X %s: %s, reg %u base %d disp %08X", hulk::addr::kActorOwnerGuard, bytes,
+                 kRules[unsigned(p.rule)], unsigned(p.owner_reg), int(p.load_base), uint32_t(p.load_disp));
+        return p;
+    }();
+    uint32_t regs[8] = {ctx.eax, ctx.ecx, ctx.edx, ctx.ebx, ctx.esp, ctx.ebp, ctx.esi, ctx.edi};
+    if (!hulk::OwnerGuardSkips(plan, regs, [base](uint32_t a) -> uint32_t { return X86_MEM32(a); })) return false;
+    ctx.eax = regs[0], ctx.ecx = regs[1], ctx.edx = regs[2], ctx.ebx = regs[3];
+    ctx.esp = regs[4], ctx.ebp = regs[5], ctx.esi = regs[6], ctx.edi = regs[7];
+    LOG_FIRST(8, "actor owner guard: the owner is gone, finishing the update's cleanup");
+    return true;
 }
 
 // the frontend's callbacks object (thiscall, owner; ret 4): registers each function the FE scripts name, then the
