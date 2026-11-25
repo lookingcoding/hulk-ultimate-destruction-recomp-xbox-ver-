@@ -1,6 +1,7 @@
 param(
     [ValidateSet('Configure','Tools','Symbols','Generate','Build')][string]$Stage = 'Build',
     [int]$Jobs = 4,
+    [string]$BuildDir = 'D:\Projects\Build Cache\Hulk Recompiled\release',
     [string]$Llvm = 'D:\Projects\Build Cache\Tools\clang+llvm-23.1.4-x86_64-pc-windows-msvc\bin'
 )
 $env:TEMP = 'D:\Projects\Build Cache\Temp'
@@ -26,7 +27,7 @@ function Test-AppliedPatch([string]$Patch) {
     return $LASTEXITCODE -eq 0
 }
 $project = Split-Path $PSScriptRoot -Parent
-$build = 'D:\Projects\Build Cache\Hulk Recompiled\release'
+$build = $BuildDir
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (!$vs) { throw 'Visual Studio C++ build tools not found' }
@@ -57,7 +58,7 @@ Push-Location $project
 try {
     # Later patches share context with earlier ones. Remove those layers in
     # reverse order before testing/reapplying the complete ordered patch queue.
-    foreach ($name in @('zzzzzzzzz-background-errors.patch','zzzzzzzz-background-silence.patch',
+    foreach ($name in @('zzzzzzzzzza-canyon-texture-mipmaps.patch','zzzzzzzzz-background-errors.patch','zzzzzzzz-background-silence.patch',
                         'zzzzzzz-internal-pad-test.patch','zzzzzzz-present-counter.patch')) {
         $layer = Join-Path $project "patches/$name"
         if (Test-AppliedPatch $layer) {
@@ -71,7 +72,7 @@ try {
             Invoke-BuildTool git @('-C','sdk','apply',$patch)
         }
     }
-    Invoke-BuildTool cmake @('--preset','release')
+    Invoke-BuildTool cmake @('--preset','release','-B',$build)
     if ($Stage -eq 'Configure') { return }
     Invoke-BuildTool cmake @('--build',$build,'--target','xbe_symbols','xbe_recomp','hulk_disasm','hulk_simulation_tests','hulk_analysis_tests','hulk_input_tests','hulk_kernel_io_tests','hulk_display_menu_tests','hulk_cheat_tests','hulk_input_usa_tests','hulk_mouse_tests','hulk_bindings_tests','hulk_controls_tests','hulk_controls_usa_tests','hulk_native_screen_tests','hulk_hint_eu_tests','hulk_hint_usa_tests','--parallel',"$Jobs")
     Invoke-BuildTool ctest @('--test-dir',$build,'--output-on-failure')

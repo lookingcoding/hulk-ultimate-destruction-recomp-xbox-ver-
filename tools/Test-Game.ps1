@@ -15,6 +15,8 @@ $env:HULK_CAPTURE_DELAY_MS = '5000'
 $env:HULK_CAPTURE_INTERVAL_MS = '10000'
 $env:HULK_CAPTURE_COUNT = '20'
 $env:HULK_TEST_INPUT = $Replay
+# hidden, silent and fed only the replay: no sound device, gamepad, keyboard, mouse or window focus
+$env:HULK_BACKGROUND_TEST = '1'
 # SDK instance 2 uses hdd2 and separate logs, keeping test saves isolated.
 $started = Get-Date
 $process = Start-Process -FilePath $exe -WorkingDirectory $run -ArgumentList '--instance','2' -WindowStyle Hidden -PassThru
