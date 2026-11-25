@@ -43,7 +43,6 @@ inline constexpr uint32_t kRetDoubleDamageProps = 0x001D709B, kRetRegenerator = 
 inline constexpr uint32_t kRetLowGravityCharacter = 0x000826CA, kRetLowGravityWorld = 0x001B5DE4;
 inline constexpr uint32_t kRetLowGravityWorldOff = 0x001B5E53;
 inline constexpr uint32_t kSetHealth = 0x0003B1C0, kTimerSetScale = 0x00086100;
-inline constexpr uint32_t kActorOwnerGuard = 0x0003B995;   // the actor update's owner guard: where its [[hook]] sits
 inline constexpr uint32_t kPhysicsWorld = 0x00554C10;  // its gravity's y at +0x14 (low gravity: -500, else -3000)
 #define HULK_SUB_AUDIO_QUALITY sub_000BBD10
 #define HULK_SUB_PRINT sub_000B45E0
@@ -104,7 +103,6 @@ inline constexpr uint32_t kRetDoubleDamageProps = 0x001D7ABB, kRetRegenerator = 
 inline constexpr uint32_t kRetLowGravityCharacter = 0x000826AA, kRetLowGravityWorld = 0x001B6024;
 inline constexpr uint32_t kRetLowGravityWorldOff = 0x001B6093;
 inline constexpr uint32_t kSetHealth = 0x0003B190, kTimerSetScale = 0x000860E0;
-inline constexpr uint32_t kActorOwnerGuard = 0x0003B965;
 inline constexpr uint32_t kPhysicsWorld = 0x004F8720;
 #define HULK_SUB_AUDIO_QUALITY sub_000BBEC0
 #define HULK_SUB_PRINT sub_000B46B0
