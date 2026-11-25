@@ -1,0 +1,256 @@
+diff --git a/runtime/audio/xaudio2.cpp b/runtime/audio/xaudio2.cpp
+--- a/runtime/audio/xaudio2.cpp
++++ b/runtime/audio/xaudio2.cpp
+@@ -8,8 +8,12 @@
+ #include <windows.h>
+ #include <xaudio2.h>
+ 
+-#include <thread>
++#include <algorithm>
++#include <atomic>
+ #include <chrono>
++#include <cstdlib>
++#include <cstring>
++#include <thread>
+ #include <vector>
+ 
+ #include "audio/audio.h"
+@@ -17,29 +21,55 @@
+ #include "core/log.h"
+ 
+ namespace audio {
++namespace {
+ 
+-void StartOutput(std::function<void(float*, uint32_t)> render) {
+-    if (app::kGame.background_test && app::kGame.background_test()) {
+-        LOGR("test fixture: audio output disabled before XAudio2 initialization; silent mixer clock active");
+-        // The game waits for streaming cursors. Advance its mixer while discarding
+-        // every sample; never create an audio device or alter system volume.
+-        std::thread([render] {
+-            constexpr uint32_t frames = kRate / 100;
+-            std::vector<float> discard(frames * 2);
+-            auto next = std::chrono::steady_clock::now();
+-            for (;;) {
+-                render(discard.data(), frames);
+-                next += std::chrono::milliseconds(10);
+-                std::this_thread::sleep_until(next);
+-            }
+-        }).detach();
+-        return;
++using Clock = std::chrono::steady_clock;
++using std::chrono::milliseconds;
++
++// Everything the game knows about time in sound comes from the mixer: where a sound is, whether it has finished,
++// when a stream's packets complete. Scripts wait on those (the tutorial's voice lines before its objectives and
++// rewards), so the mixer has to keep running in real time even when no sound device takes its output: none at
++// start, one lost later (unplugged, the default device changed, the engine's critical error) or one that stops
++// asking for sound. Then it renders into nothing at the same rate and tries the device again now and then.
++constexpr uint32_t kFrames = kRate / 100;  // 10 ms a buffer
++constexpr auto kBuffer = milliseconds(10);
++constexpr uint32_t kMinQueued = 3;
++constexpr uint32_t kMaxQueued = 10;
++// one slot more than can be queued, so the one rendered is never one XAudio2 still reads
++constexpr uint32_t kSlots = kMaxQueued + 1;
++constexpr auto kStalled = milliseconds(500);  // a started voice that plays nothing for this long is lost
++constexpr auto kFirstRetry = milliseconds(2000), kLastRetry = milliseconds(30000);
++
++struct Engine : IXAudio2EngineCallback {
++    std::atomic<HRESULT> error{S_OK};
++    void STDMETHODCALLTYPE OnProcessingPassStart() noexcept override {}
++    void STDMETHODCALLTYPE OnProcessingPassEnd() noexcept override {}
++    void STDMETHODCALLTYPE OnCriticalError(HRESULT hr) noexcept override { error = FAILED(hr) ? hr : E_FAIL; }
++};
++
++struct Device {
++    IXAudio2* xa = nullptr;
++    IXAudio2MasteringVoice* master = nullptr;
++    IXAudio2SourceVoice* voice = nullptr;
++    Engine engine;
++    uint32_t depth = kMinQueued;
++    bool playing = false;
++    uint64_t played = 0;
++    Clock::time_point progressed;
++
++    void Close() {
++        if (voice) voice->DestroyVoice();
++        if (master) master->DestroyVoice();
++        if (xa) {
++            xa->UnregisterForCallbacks(&engine);
++            xa->StopEngine();
++            xa->Release();
++        }
++        voice = nullptr, master = nullptr, xa = nullptr;
+     }
+-    std::thread([render] {
+-        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+-        IXAudio2* xa = nullptr;
+-        IXAudio2MasteringVoice* master = nullptr;
+-        IXAudio2SourceVoice* voice = nullptr;
++    HRESULT Open() {
++        engine.error = S_OK;
++        depth = kMinQueued, playing = false, played = 0;
+         WAVEFORMATEX wf{};
+         wf.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+         wf.nChannels = 2;
+@@ -48,55 +78,118 @@ void StartOutput(std::function<void(float*, uint32_t)> render) {
+         wf.nBlockAlign = 8;
+         wf.nAvgBytesPerSec = kRate * 8;
+         HRESULT hr = XAudio2Create(&xa, 0, XAUDIO2_DEFAULT_PROCESSOR);
++        if (SUCCEEDED(hr)) hr = xa->RegisterForCallbacks(&engine);
+         if (SUCCEEDED(hr)) hr = xa->CreateMasteringVoice(&master);
+         if (SUCCEEDED(hr)) hr = xa->CreateSourceVoice(&voice, &wf);
+-        if (FAILED(hr)) {
+-            LOGE("audio: XAudio2 unavailable (%08X), no sound", unsigned(hr));
+-            return;
+-        }
+-        constexpr uint32_t kFrames = kRate / 100;
+-        constexpr uint32_t kMinQueued = 3;
+-        constexpr uint32_t kMaxQueued = 10;
+-        // one slot more than can be queued, so the one rendered is never one XAudio2 still reads
+-        constexpr uint32_t kSlots = kMaxQueued + 1;
+-        std::vector<float> bufs(kSlots * kFrames * 2);
+-        uint32_t depth = kMinQueued;
+-        bool playing = false;
+-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+-        for (uint32_t n = 0;;) {
+-            XAUDIO2_VOICE_STATE st;
+-            voice->GetState(&st, XAUDIO2_VOICE_NOSAMPLESPLAYED);
+-            // a starved voice crackles: queue one buffer more each time, up to kMaxQueued
+-            if (playing && !st.BuffersQueued && depth < kMaxQueued) {
+-                depth++;
+-                LOGI("audio: output starved, queueing %u ms", depth * 10);
++        if (FAILED(hr)) Close();
++        return hr;
++    }
++};
++
++// test fixtures: HULK_TEST_AUDIO=frozen stops the mixer as v0.5.3 did when the device failed (to show what waits on
++// it); anything else, or nothing, renders silently in real time as a missing device now does
++bool FrozenForTest() {
++    const char* v = std::getenv("HULK_TEST_AUDIO");
++    return v && std::strcmp(v, "frozen") == 0;
++}
++
++void Run(const std::function<void(float*, uint32_t)>& render, bool use_device) {
++    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
++    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
++    std::vector<float> bufs(kSlots * kFrames * 2);
++    Device dev;
++    bool open = false;
++    auto retry = kFirstRetry;
++    Clock::time_point next_try = Clock::now();
++    Clock::time_point silent = Clock::now();  // how far the mixer has rendered with no device
++    auto lose = [&](const char* why, HRESULT hr) {
++        LOGW("audio: %s (%08X); the game's sound keeps running silently, trying the device again in %lld s", why,
++             unsigned(hr), (long long)(retry.count() / 1000));
++        dev.Close();
++        open = false;
++        silent = Clock::now();
++        next_try = silent + retry;
++        retry = std::min(retry * 2, kLastRetry);
++    };
++    for (uint32_t n = 0;;) {
++        Clock::time_point now = Clock::now();
++        if (!open && use_device && now >= next_try) {
++            HRESULT hr = dev.Open();
++            if (SUCCEEDED(hr)) {
++                open = true;
++                dev.progressed = now;
++            } else {
++                lose("no sound device", hr);
+             }
+-            if (st.BuffersQueued >= depth) {
+-                if (!playing) {
+-                    hr = voice->Start();
+-                    if (FAILED(hr)) {
+-                        LOGE("audio: source voice start failed (%08X)", unsigned(hr));
+-                        return;
+-                    }
+-                    playing = true;
+-                    LOGI("audio: output started with %u ms buffered", depth * 10);
++        }
++        if (!open) {
++            // no device: render into nothing at the device's rate, 10 ms at a time
++            float* b = bufs.data();
++            for (int i = 0; i < 10 && silent + kBuffer <= now; i++, silent += kBuffer) render(b, kFrames);
++            if (now - silent > milliseconds(100)) silent = now - milliseconds(100);  // never rush to catch up
++            std::this_thread::sleep_until(std::min(silent + kBuffer, use_device ? next_try : silent + kBuffer));
++            continue;
++        }
++        if (HRESULT hr = dev.engine.error; FAILED(hr)) {
++            lose("sound device lost", hr);
++            continue;
++        }
++        XAUDIO2_VOICE_STATE st;
++        dev.voice->GetState(&st, 0);
++        if (st.SamplesPlayed != dev.played) {
++            dev.played = st.SamplesPlayed;
++            dev.progressed = now;
++            retry = kFirstRetry;  // a device that plays is a working one
++        } else if (dev.playing && now - dev.progressed > kStalled) {
++            lose("sound device stopped playing", E_FAIL);
++            continue;
++        }
++        // a starved voice crackles: queue one buffer more each time, up to kMaxQueued
++        if (dev.playing && !st.BuffersQueued && dev.depth < kMaxQueued) {
++            dev.depth++;
++            LOGI("audio: output starved, queueing %u ms", dev.depth * 10);
++        }
++        if (st.BuffersQueued >= dev.depth) {
++            if (!dev.playing) {
++                HRESULT hr = dev.voice->Start();
++                if (FAILED(hr)) {
++                    lose("source voice start failed", hr);
++                    continue;
+                 }
+-                Sleep(2);
+-                continue;
++                dev.playing = true;
++                dev.progressed = now;
++                LOGI("audio: output started with %u ms buffered", dev.depth * 10);
+             }
+-            float* b = &bufs[(n % kSlots) * kFrames * 2];
+-            render(b, kFrames);
+-            XAUDIO2_BUFFER xb{};
+-            xb.AudioBytes = kFrames * 8;
+-            xb.pAudioData = reinterpret_cast<const BYTE*>(b);
+-            hr = voice->SubmitSourceBuffer(&xb);
+-            if (FAILED(hr)) {
+-                LOGE("audio: buffer submission failed (%08X)", unsigned(hr));
+-                return;
+-            }
+-            n++;  // only a submitted buffer takes a slot, XAudio2 still reads the queued ones
++            Sleep(2);
++            continue;
++        }
++        float* b = &bufs[(n % kSlots) * kFrames * 2];
++        render(b, kFrames);
++        XAUDIO2_BUFFER xb{};
++        xb.AudioBytes = kFrames * 8;
++        xb.pAudioData = reinterpret_cast<const BYTE*>(b);
++        if (HRESULT hr = dev.voice->SubmitSourceBuffer(&xb); FAILED(hr)) {
++            lose("buffer submission failed", hr);
++            continue;
++        }
++        n++;  // only a submitted buffer takes a slot, XAudio2 still reads the queued ones
++    }
++}
++
++}  // namespace
++
++void StartOutput(std::function<void(float*, uint32_t)> render) {
++    if (app::kGame.background_test && app::kGame.background_test()) {
++        // never create an audio device or alter system volume in a test
++        if (FrozenForTest()) {
++            LOGR("test fixture: audio output disabled before XAudio2 initialization; mixer clock frozen");
++            return;
+         }
+-    }).detach();
++        LOGR("test fixture: audio output disabled before XAudio2 initialization; silent mixer clock active");
++        std::thread([render] { Run(render, false); }).detach();
++        return;
++    }
++    std::thread([render] { Run(render, true); }).detach();
+ }
+ 
+ }  // namespace audio

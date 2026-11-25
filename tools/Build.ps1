@@ -58,7 +58,7 @@ Push-Location $project
 try {
     # Later patches share context with earlier ones. Remove those layers in
     # reverse order before testing/reapplying the complete ordered patch queue.
-    foreach ($name in @('zzzzzzzzzza-canyon-texture-mipmaps.patch','zzzzzzzzz-background-errors.patch','zzzzzzzz-background-silence.patch',
+    foreach ($name in @('zzzzzzzzzzb-audio-clock.patch','zzzzzzzzzza-canyon-texture-mipmaps.patch','zzzzzzzzz-background-errors.patch','zzzzzzzz-background-silence.patch',
                         'zzzzzzz-internal-pad-test.patch','zzzzzzz-present-counter.patch')) {
         $layer = Join-Path $project "patches/$name"
         if (Test-AppliedPatch $layer) {
