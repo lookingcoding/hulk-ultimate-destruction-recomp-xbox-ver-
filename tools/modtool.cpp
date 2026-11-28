@@ -77,8 +77,14 @@ void Extract(const Source& src, const fs::path& out, std::ofstream& index) {
         fs::create_directories(target.parent_path(), ec);
         buf.resize(rcf->Size(f.entry));
         size_t got = src.read(rcf->Offset(f.entry), buf.data(), buf.size());
+        if (got != buf.size()) {
+            g_failed++;
+            continue;
+        }
         std::ofstream file(target, std::ios::binary);
-        if (got != buf.size() || !file.write(reinterpret_cast<const char*>(buf.data()), buf.size())) {
+        if (!file.write(reinterpret_cast<const char*>(buf.data()), buf.size())) {
+            file.close();
+            fs::remove(target, ec);  // a partial file would be kept as already there the next run
             g_failed++;
             continue;
         }
@@ -105,7 +111,9 @@ int wmain(int argc, wchar_t** argv) {
     if (fs::exists(assets / "default.xbe", ec)) {
         std::cout << "From the extracted game in " << assets.string() << "\n";
         for (auto& e : fs::directory_iterator(assets, ec)) {
-            if (!e.is_regular_file(ec) || e.path().extension() != ".rcf") continue;
+            std::wstring ext = e.path().extension().wstring();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+            if (!e.is_regular_file(ec) || ext != L".rcf") continue;
             auto path = e.path();
             auto fp = std::shared_ptr<FILE>(_wfopen(path.c_str(), L"rb"), [](FILE* f) { if (f) std::fclose(f); });
             if (!fp) continue;

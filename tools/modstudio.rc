@@ -1,0 +1,23 @@
+// Hulk Mod Studio's resources: a version block for the file's properties. The common controls v6 and dpi manifest
+// comes in through the linker (tools/modstudio.manifest, CMakeLists.txt), where CMake already asks for one.
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", "Hulk Mod Studio"
+      VALUE "ProductName", "Hulk Recompiled"
+      VALUE "FileVersion", "1.0"
+      VALUE "ProductVersion", "1.0"
+      VALUE "OriginalFilename", "Hulk Mod Studio.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 0x4B0
+  END
+END

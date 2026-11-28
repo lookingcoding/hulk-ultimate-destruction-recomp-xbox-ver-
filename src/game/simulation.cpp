@@ -4,6 +4,7 @@
 #include "common/simulation.h"
 #include "common/addresses.h"
 #include "common/cheats.h"
+#include "common/plugins.h"
 #include "core/log.h"
 #include "gpu/backend.h"
 #include "xdk/hle.h"
@@ -105,7 +106,9 @@ X86_FUNC(WORLD_UPDATE) {
         path == hulk::UpdatePath::Nonpositive) {
         clock.Reset();
         report();
+        hulk::g_world_dt = elapsed;  // the update runs with its own elapsed, as the console did
         WORLD_UPDATE_ORIGINAL(ctx, base);
+        hulk::plugins::Tick(hulk::g_world_dt);  // plugins.h: after the world's update, on its thread
         return;
     }
     // A critical move's slow motion scales the game's frame time down, and the console ran
@@ -117,10 +120,12 @@ X86_FUNC(WORLD_UPDATE) {
     if (path == hulk::UpdatePath::Dilated) {
         clock.Reset();
         report();
+        hulk::g_world_dt = elapsed;  // the dilated time the update runs with
         WORLD_UPDATE_ORIGINAL(ctx, base);
         const uint32_t eax = ctx.eax;
         hulk::cheats::RunAppliers(ctx, base);  // cheats.h: after the world's update, on its thread
         ctx.eax = eax;
+        hulk::plugins::Tick(hulk::g_world_dt);  // plugins.h: after the world's update, on its thread
         return;
     }
     // When a cutscene shot ends, the game holds its renderer (the render manager's byte +0x31, set by
@@ -131,12 +136,14 @@ X86_FUNC(WORLD_UPDATE) {
     // about one second when every pass runs it. Passes that swapped no frame run the update once, with the time
     // measured since the previous call plus whatever the clock still held.
     if (path == hulk::UpdatePath::Unpaced) {
+        hulk::g_world_dt = elapsed + clock.Drain();  // the drained time the update runs with
         X86_MEM32(stack + 8) = std::bit_cast<uint32_t>(elapsed + clock.Drain());
         report();
         WORLD_UPDATE_ORIGINAL(ctx, base);
         const uint32_t eax = ctx.eax;
         hulk::cheats::RunAppliers(ctx, base);  // cheats.h: after the world's update, on its thread
         ctx.eax = eax;
+        hulk::plugins::Tick(hulk::g_world_dt);  // plugins.h: after the world's update, on its thread
         return;
     }
     const unsigned steps = clock.Advance(elapsed);
@@ -158,9 +165,11 @@ X86_FUNC(WORLD_UPDATE) {
         // reconstruct its call frame, not inherit the previous tick's overwritten arguments.
         X86_MEM32(stack + 4) = state;
         X86_MEM32(stack + 8) = std::bit_cast<uint32_t>(hulk::SimulationClock::kStep);
+        hulk::g_world_dt = hulk::SimulationClock::kStep;  // the step the update runs with
         WORLD_UPDATE_ORIGINAL(ctx, base);
         const uint32_t eax = ctx.eax;
         hulk::cheats::RunAppliers(ctx, base);  // cheats.h: after the world's update, on its thread
         ctx.eax = eax;
+        hulk::plugins::Tick(hulk::g_world_dt);  // plugins.h: after the world's update, on its thread
     }
 }

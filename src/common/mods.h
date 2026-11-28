@@ -8,9 +8,11 @@ namespace app { struct FileView; }
 
 // Mods: the mods folder beside assets holds a folder for each mod, and every file in one stands in for the game's
 // file of the same path. A path inside an archive (art\copyright-en.p3d, frontend\fe_real.txt, scripts) replaces that
-// file inside whichever archive holds it; a path of the disc's own (misc.rcf) replaces the whole file. Mods load in
-// name order and a later one wins; a folder whose name starts with _ or . is off. Nothing on disk changes: the game
-// reads a view of each archive whose directory points the replaced files past its end.
+// file inside whichever archive holds it; a path of the disc's own (misc.rcf) replaces the whole file; a path under an
+// archive's name (misc.rcf\art\new.p3d) or beside the files of a folder the archive has is added to it as a new file.
+// A mod folder wrapped in assets\ or Game Files\, as the mod tool writes them, works as it is. Mods load in name order
+// and a later one wins; a folder whose name starts with _ or . is off. Nothing on disk changes: the game reads a view
+// of each archive whose directory points the replaced and added files past its end.
 namespace hulk {
 
 // finds the mods, before the game opens its files (game_info.cpp)

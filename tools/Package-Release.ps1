@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][ValidatePattern('^v\d+\.\d+\.\d+$')][string]$Version,
-    [string]$Output = 'D:\Projects\Build Cache\Hulk Recompiled\dist'
+    [string]$Output = 'D:\Projects\Build Cache\Hulk Recompiled\dist',
+    [string]$Build = 'D:\Projects\Build Cache\Hulk Recompiled\release'
 )
 # The release players download: the loader, Hulk Recompiled.exe (tools/loader.cpp), beside assets\ and game\, which
 # holds an executable for each release of the game's disc and the compiler folder that builds the game's code from
@@ -8,11 +9,12 @@ param(
 # disc in assets (src/common/release.cpp). No game data and no code recompiled from the game is included.
 $ErrorActionPreference = 'Stop'
 $project = Split-Path $PSScriptRoot -Parent
-$build = 'D:\Projects\Build Cache\Hulk Recompiled\release'
+$build = $Build
 $loader = 'Hulk Recompiled'
 $executables = 'HulkRecompiled', 'HulkRecompiledUSA'
 $modtool = 'Hulk Mod Tool'
-foreach ($exe in @($loader, $modtool) + $executables) { if (!(Test-Path -LiteralPath "$build\$exe.exe")) { throw "Build the game first: $exe.exe is missing" } }
+$modstudio = 'Hulk Mod Studio'
+foreach ($exe in @($loader, $modtool, $modstudio) + $executables) { if (!(Test-Path -LiteralPath "$build\$exe.exe")) { throw "Build the game first: $exe.exe is missing" } }
 $name = "HulkRecompiled-$Version-windows-x64"
 $stage = Join-Path $Output $name
 $zip = "$stage.zip"
@@ -27,6 +29,7 @@ function Copy-Verified([string]$Source, [string]$Relative) {
 }
 Copy-Verified "$build\$loader.exe" "$loader.exe"
 Copy-Verified "$build\$modtool.exe" "$modtool.exe"  # copies the game's files out for modding (tools/modtool.cpp)
+Copy-Verified "$build\$modstudio.exe" "$modstudio.exe"  # OpenIV-style archive browser & mod manager (tools/modstudio.cpp)
 foreach ($exe in $executables) { Copy-Verified "$build\$exe.exe" "game\$exe.exe" }
 foreach ($file in Get-ChildItem "$build\compiler" -File -Recurse) {
     $relative = $file.FullName.Substring("$build\compiler\".Length)
@@ -38,6 +41,9 @@ Copy-Verified "$project\recomplauncher.json" 'recomplauncher.json'  # RecompLaun
 Copy-Verified "$project\LICENSE" 'LICENSE.txt'
 Copy-Verified "$project\sdk\LICENSE" 'SDK-LICENSE.txt'
 Copy-Verified "$project\sdk\THIRD_PARTY.txt" 'THIRD_PARTY.txt'
+Copy-Verified "$project\plugins\hulk_plugin.h" 'plugins\hulk_plugin.h'
+Copy-Verified "$project\plugins\example_trainer.cpp" 'plugins\example_trainer.cpp'
+Copy-Verified "$project\docs\plugin-api.md" 'docs\plugin-api.md'
 
 New-Item -ItemType Directory -Path "$stage\assets" | Out-Null
 @'
@@ -51,6 +57,8 @@ Hulk Recompiled.exe.
 No game files are included with this download.
 '@ | Set-Content -LiteralPath "$stage\assets\PUT YOUR GAME ISO HERE.txt" -Encoding ASCII
 
-Compress-Archive -Path "$stage\*" -DestinationPath $zip
+$items = @(Get-ChildItem -LiteralPath $stage | Select-Object -ExpandProperty Name)
+& tar.exe -a -c -f $zip -C $stage @items
+if ($LASTEXITCODE -ne 0) { throw "tar.exe failed to create $zip (exit $LASTEXITCODE)" }
 $hash = (Get-FileHash -LiteralPath $zip).Hash
 Write-Host "Packaged $zip ($([math]::Round((Get-Item -LiteralPath $zip).Length / 1MB)) MB), SHA256 $hash"

@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <string>
 #include <vector>
 #include "app/app.h"
@@ -13,6 +14,7 @@
 #include "common/native_controls.h"
 #include "common/cheats.h"
 #include "common/language.h"
+#include "common/rcf.h"
 #include "common/view.h"
 #include "kernel/kernel.h"
 namespace hulk { bool BackgroundTest() { return false; } }
@@ -123,6 +125,76 @@ int main(int argc, char** argv) {
     hulk::SetLanguage(hulk::Language::Spanish);
     hulk::cheats::Load(hulk::cheats::Cheat::Damage, 2);  // x4
     hulk::cheats::Load(hulk::cheats::Cheat::InfiniteRage, 1);
+
+    // the archive's names' hash: every entry of the real one hashes to what its directory says
+    auto real = hulk::ReadRcf(own.size(), read);
+    if (Check(real.has_value(), "misc.rcf reads as a cement library")) {
+        bool hashed = true;
+        for (const hulk::Rcf::File& f : real->files)
+            hashed &= U32(real->dir, size_t(f.entry) * 12) == hulk::HashName(f.name);
+        Check(hashed && real->files.size() > 500, "every entry's hash is HashName of its name");
+        Check(hulk::HashName("\\Frontend\\FE_CONFIG.TXT") == hulk::HashName("frontend\\fe_config.txt"),
+              "the hash is caseless and counts no leading backslash");
+
+        // files a mod adds: written past the end with the directory and names rebuilt around them, the
+        // archive reading as one again and every file it had unchanged
+        std::map<std::string, std::pair<uint32_t, uint32_t>> was;  // name -> where it starts, how long
+        for (const hulk::Rcf::File& f : real->files) was[f.name] = {real->Offset(f.entry), real->Size(f.entry)};
+        const char* added_beside = "frontend\\added.txt";
+        const char* added_top = "added.txt";
+        const std::string beside_bytes = "a file a mod added\r\n", top_bytes = "another, at the top\r\n";
+        Check(!real->Find(added_beside) && !real->Find(added_top), "the names to add are new");
+        uint32_t beside = real->Add(added_beside, uint32_t(beside_bytes.size()));
+        uint32_t top = real->Add(added_top, uint32_t(top_bytes.size()));
+        hulk::RcfWritten w = hulk::WriteRcf(*real, {{beside, uint32_t(beside_bytes.size())},
+                                                    {top, uint32_t(top_bytes.size())}},
+                                            own.size());
+        std::vector<uint8_t> grown(w.size, 0);
+        std::memcpy(grown.data(), own.data(), own.size());
+        std::memcpy(grown.data(), w.header.data(), w.header.size());
+        std::memcpy(grown.data() + w.at, w.dir.data(), w.dir.size());
+        std::memcpy(grown.data() + w.at + w.dir.size(), w.names.data(), w.names.size());
+        uint64_t at = w.data;
+        std::memcpy(grown.data() + at, beside_bytes.data(), beside_bytes.size());
+        at = hulk::AlignRcf(at + beside_bytes.size());
+        std::memcpy(grown.data() + at, top_bytes.data(), top_bytes.size());
+        Check(at + top_bytes.size() == w.size && w.at % 0x800 == 0 && w.data % 0x800 == 0,
+              "the added files end the archive where WriteRcf says, on sectors");
+        Check(U32(grown, 0x38) == was.size() + 2, "the count counts the added files");
+
+        hulk::ReadFn back = [&](uint64_t o, void* dst, size_t n) -> size_t {
+            if (o >= grown.size()) return 0;
+            n = std::min<size_t>(n, grown.size() - o);
+            std::memcpy(dst, grown.data() + o, n);
+            return n;
+        };
+        auto again = hulk::ReadRcf(grown.size(), back);
+        if (Check(again.has_value(), "the archive with the files added reads again")) {
+            std::map<std::string, std::pair<uint32_t, uint32_t>> now;
+            for (const hulk::Rcf::File& f : again->files) now[f.name] = {again->Offset(f.entry), again->Size(f.entry)};
+            bool kept = now.size() == was.size() + 2;
+            for (const auto& [name, at_size] : was) kept &= now.count(name) && now[name] == at_size;
+            Check(kept, "every file the archive had keeps its name, place and size");
+            auto contents = [&](const char* name) {
+                auto it = now.find(name);
+                return it == now.end()
+                           ? std::vector<uint8_t>()
+                           : std::vector<uint8_t>(grown.begin() + it->second.first,
+                                                  grown.begin() + it->second.first + it->second.second);
+            };
+            Check(contents(added_beside) == std::vector<uint8_t>(beside_bytes.begin(), beside_bytes.end()),
+                  "the file added beside the frontend's reads as the mod wrote it");
+            Check(contents(added_top) == std::vector<uint8_t>(top_bytes.begin(), top_bytes.end()),
+                  "the one at the archive's top does too");
+            bool sorted = true;
+            const uint32_t dir = U32(grown, 0x24), count = U32(grown, 0x38);
+            for (uint32_t i = 0; i + 1 < count; i++) sorted &= U32(grown, dir + i * 12) < U32(grown, dir + (i + 1) * 12);
+            Check(sorted, "the rebuilt directory is sorted by hash");
+            Check(U32(grown, 0x2C) == w.at + w.dir.size() && U32(grown, 0x30) == w.names.size() &&
+                      U32(grown, U32(grown, 0x2C)) == 0x800,
+                  "the header points at the names block past the end, and the block starts with its alignment");
+        }
+    }
 
     Check(!hulk::GameFileView("D:\\art.rcf", own.size(), read), "only misc.rcf gets a view");
     auto view = hulk::GameFileView("D:\\misc.rcf", own.size(), read);

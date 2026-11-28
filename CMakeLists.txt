@@ -35,6 +35,15 @@ add_executable(hulk_modtool tools/modtool.cpp src/common/rcf.cpp ${SDK}/runtime/
 set_target_properties(hulk_modtool PROPERTIES OUTPUT_NAME "Hulk Mod Tool")
 target_include_directories(hulk_modtool PRIVATE src ${SDK}/runtime)
 
+# Hulk Mod Studio.exe: an OpenIV-style GUI for browsing the game's archives and managing mods (tools/modstudio.cpp)
+add_executable(hulk_modstudio WIN32 tools/modstudio.cpp tools/modstudio.rc src/common/rcf.cpp ${SDK}/runtime/kernel/disc.cpp)
+set_target_properties(hulk_modstudio PROPERTIES OUTPUT_NAME "Hulk Mod Studio")
+target_compile_definitions(hulk_modstudio PRIVATE UNICODE _UNICODE)
+target_include_directories(hulk_modstudio PRIVATE src ${SDK}/runtime)
+target_link_libraries(hulk_modstudio PRIVATE comctl32 comdlg32 shell32 ole32)
+# CMake asks the linker for a manifest; ours adds the common controls v6 theme and per-monitor dpi
+target_link_options(hulk_modstudio PRIVATE "-Wl,/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/tools/modstudio.manifest")
+
 enable_testing()
 add_executable(hulk_simulation_tests tests/simulation.cpp)
 target_include_directories(hulk_simulation_tests PRIVATE src)

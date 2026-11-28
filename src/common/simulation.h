@@ -66,4 +66,9 @@ inline UpdatePath ClassifyUpdate(uint32_t state, float elapsed, bool dilated, bo
 inline bool TimeDilated(bool timer_present, uint64_t scale) {
     return timer_present && scale < 65536;
 }
+
+// The elapsed time the world update in progress runs with, set on each of its paths (game/simulation.cpp):
+// the console's own elapsed on the paused, dilated and unpaced passes, the drained time an unpaced pass
+// runs with, and the accumulator's 60 Hz step. plugins::Tick is called with it after each step (plugins.h).
+inline float g_world_dt = 0;
 }

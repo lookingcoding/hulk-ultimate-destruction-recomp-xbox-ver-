@@ -6,6 +6,7 @@
 #include "common/display_menu.h"
 #include "common/keyboard.h"
 #include "common/mods.h"
+#include "common/plugins.h"
 #include "common/release.h"
 #include "common/replay.h"
 #include "common/settings_ui.h"
@@ -15,6 +16,10 @@
 
 // SDL3, linked into the executable for the runtime's controllers (input::Init opens it before boot)
 extern "C" bool SDL_HasGamepad(void);
+
+#ifndef WM_DESTROY  // windows.h's, which this file does not include
+#define WM_DESTROY 0x0002
+#endif
 
 #ifdef HULK_USA
 constexpr const char* kExe = "HulkRecompiledUSA";  // the North American release
@@ -40,6 +45,7 @@ void OnInit() {
     hulk::InitDiagnostics();
     hulk::RunMatchingRelease();  // the other release's game in assets: its own executable runs it
     hulk::LoadMods();            // mods\ beside assets (mods.h)
+    hulk::plugins::Load();       // mods\*.dll and *.asi, the script plugins (plugins.h)
 }
 
 void OnImageLoaded() {
@@ -72,6 +78,8 @@ void OnPad(int port, input::Pad& pad) {
 }
 
 bool OnMessage(void* hwnd, uint32_t message, uintptr_t wp, intptr_t lp, intptr_t* result) {
+    // the game window's last message: the plugins are unloaded on the way out (plugins.h)
+    if (message == WM_DESTROY && hwnd == app::Window()) hulk::plugins::Unload();
     if (hulk::BackgroundTest()) return false;
     if (hulk::ControlsMessage(message, wp, lp, result)) return true;
     return hulk::KeyboardMessage(hwnd, message, wp, lp, result);
