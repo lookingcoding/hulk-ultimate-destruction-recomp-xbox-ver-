@@ -102,7 +102,7 @@ X86_FUNC(HULK_SUB_FE_INITIALISE) {
 // share it with their own owners
 X86_EXTERN_FUNC(HULK_IMP(HULK_SUB_AUDIO_QUALITY));
 X86_FUNC(HULK_SUB_AUDIO_QUALITY) {
-    if (hulk::DisplayCallback(ctx.ecx, X86_MEM32(ctx.esp + 4))) {
+    if (hulk::DisplayCallback(ctx, ctx.ecx, X86_MEM32(ctx.esp + 4))) {
         ctx.esp += 8;
         return;
     }

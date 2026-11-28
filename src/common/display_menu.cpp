@@ -4,6 +4,7 @@
 #include "common/addresses.h"
 #include "common/cheats.h"
 #include "common/language.h"
+#include "common/mission_menu.h"
 #include "common/rcf.h"
 #include "common/view.h"
 #include <algorithm>
@@ -46,8 +47,8 @@ constexpr auto kSettleTime = std::chrono::milliseconds(400);
 
 // kFov and kRenderDistance are the game's view (view.h), applied at once; kLanguage the game's language
 // (language.h), from the next start; the others are the window's, applied once they settle. The camera distance has
-// no row: the mouse wheel sets it in play (view.h)
-enum Setting { kMode, kResolution, kFrameRate, kVSync, kScale, kFov, kRenderDistance, kLanguage, kSettings };
+// no row: the mouse wheel sets it in play (view.h). kTextures is the optional HD texture pack (texturedumper.h)
+enum Setting { kMode, kResolution, kFrameRate, kVSync, kScale, kFov, kRenderDistance, kTextures, kLanguage, kSettings };
 // rows the window's settings don't hold
 bool InGame(int s) { return s == kFov || s == kRenderDistance || s == kLanguage; }
 
@@ -108,6 +109,7 @@ const Text kTexts[] = {
     {"TBS_PC_SCALE_300", {"300%", "300 %", "300%", "300%"}},
     {"TBS_PC_SCALE_400", {"400%", "400 %", "400%", "400%"}},
     {"TBS_PC_CUSTOM", {"Custom", "Personnalisé", "Personalizado", "Personalizzato"}},
+    {"TBS_PC_TEXTURE_PACK", {"HD Texture Pack", "Pack de textures HD", "Paquete de texturas HD", "Pacchetto texture HD"}},
     {"TBS_PC_LANGUAGE", {"Language (restart)", "Langue (redémarrage)", "Idioma (reiniciar)", "Lingua (riavvio)"}},
     {"TBS_PC_LANG_EN", {"English", "English", "English", "English"}},
     {"TBS_PC_LANG_FR", {"Français", "Français", "Français", "Français"}},
@@ -172,6 +174,7 @@ bool Matches(Setting s, const Entry& e, const app::Settings& st) {
         case kScale: return st.render_percent == e.a;
         case kFov: return uint32_t(GetFovIncrease()) == e.a;
         case kRenderDistance: return uint32_t(GetRenderDistance()) == e.a;
+        case kTextures: return uint32_t(st.custom_textures) == e.a;
         case kLanguage: return uint32_t(GetLanguage()) == e.a;
         default: return false;
     }
@@ -186,6 +189,7 @@ void Assign(Setting s, const Entry& e, app::Settings& st) {
         case kScale: st.render_percent = e.a; break;
         case kFov: SetFovIncrease(int(e.a)); break;
         case kRenderDistance: SetRenderDistance(int(e.a)); break;
+        case kTextures: st.custom_textures = e.a != 0; break;
         case kLanguage: SetLanguage(Language(e.a)); break;
         default: break;
     }
@@ -233,6 +237,8 @@ std::vector<Option> MakeOptions(const app::Settings& st) {
           {"TBS_PC_SCALE_200", 200, 0},
           {"TBS_PC_SCALE_300", 300, 0},
           {"TBS_PC_SCALE_400", 400, 0}}},
+        {"PCTextures", "pc_textures_selector", "TBS_PC_TEXTURE_PACK",
+         {{"TBS_MENU_ITEM_CHOICE_ON", 1, 0}, {"TBS_MENU_ITEM_CHOICE_OFF", 0, 0}}},
         {"PCLanguage", "pc_language_selector", "TBS_PC_LANGUAGE",
          {{"TBS_PC_LANG_EN", uint32_t(Language::English), 0},
           {"TBS_PC_LANG_FR", uint32_t(Language::French), 0},
@@ -251,6 +257,7 @@ std::vector<Option> MakeOptions(const app::Settings& st) {
                 case kScale: custom.a = st.render_percent; break;
                 case kFov: custom.a = uint32_t(GetFovIncrease()); break;
                 case kRenderDistance: custom.a = uint32_t(GetRenderDistance()); break;
+                case kTextures: custom.a = uint32_t(st.custom_textures); break;
                 case kLanguage: custom.a = uint32_t(GetLanguage()); break;
             }
             entries.push_back(custom);
@@ -389,7 +396,98 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
         }
         return v + nl;
     };
+    // Mission / Free-Roam quick select (mission_menu.h): both menus name the missions by the string table keys the
+    // disc already has, and the host starts the row the player picked through the frontend's StartMission
+    auto mission_keys = [&](const Mission* story, size_t story_count, const Mission* free_roam, size_t free_count) {
+        std::string keys;
+        for (size_t i = 0; i < story_count; i++) keys += std::string(" ") + story[i].name_key;
+        for (size_t i = 0; i < free_count; i++) keys += std::string(" ") + free_roam[i].name_key;
+        return keys;
+    };
+
+    // the pause menu's Mission Select screen: a Story / Free Roam toggle and the missions, story first
+    auto mission_screen = [&]() {
+        std::string sub;
+        sub += "AddNamedValueInt \"PCMissionPage\" 0 \"PCMissionPageChanged\"" + nl;
+        sub += "AddNamedValueInt \"PCMissionSelected\" 0 \"PCMissionSelectedChanged\"" + nl + nl;
+        sub += "AddScreen \"pc_missions\"" + nl;
+        sub += "{" + nl;
+        sub += "    $MACRO_INSERT typicalScreenSetup" + nl + nl;
+        sub += std::string("    AddLabel \"") + l.title + "\"" + nl;
+        sub += "    {" + nl;
+        sub += "        text \"TBS_MENU_ITEM_MS_MISSION_SELECT\" 1" + nl;
+        sub += "        $MACRO_INSERT FormatTitleText" + nl + nl;
+        sub += "        TransitionAnimEnter \"fadein\"" + nl;
+        sub += "        TransitionAnimExit  \"fadeout\"" + nl;
+        sub += "    }" + nl;
+        sub += nl + "    AddTextSelector \"" + l.row + "1\"" + nl;
+        sub += "    {" + nl;
+        sub += "        text \"TBS_MENU_ITEM_MISSIONS\" 1" + nl + nl;
+        sub += "        name \"pc_mission_page\"" + nl;
+        sub += "        TextSelection \"\" TBS_MENU_ITEM_MISSIONS TBS_MENU_ITEM_FREE_ROAM" + nl;
+        sub += "        NamedValue \"PCMissionPage\"" + nl + nl;
+        sub += "        OnHighlight function \"UpdateControlButtonString\" \"DynamicControlButtonLabel\"  \"2\"" + nl;
+        sub += "        $MACRO_INSERT FormatText" + nl;
+        sub += bars("1");
+        sub += "    }" + nl;
+        sub += nl + "    AddTextSelector \"" + l.row + "2\"" + nl;
+        sub += "    {" + nl;
+        sub += "        text \"TBS_MENU_ITEM_MS_MISSION_SELECT\" 1" + nl + nl;
+        sub += "        name \"pc_mission_selector\"" + nl;
+        sub += "        TextSelection \"\"" + mission_keys(kStoryMissions, kStoryMissionCount, kFreeRoamMissions,
+                                                            kFreeRoamMissionCount) + nl;
+        sub += "        NamedValue \"PCMissionSelected\"" + nl + nl;
+        sub += "        OnSelect function \"PCMissionSelect\" \"pc_mission_selector\"" + nl;
+        sub += "        OnHighlight function \"UpdateControlButtonString\" \"DynamicControlButtonLabel\"  \"2\"" + nl;
+        sub += "        OnHighlight function \"PCMissionSync\"" + nl;
+        sub += "        $MACRO_INSERT FormatText" + nl;
+        sub += bars("2");
+        sub += "    }" + nl;
+        sub += nl + "    $MACRO_INSERT SetupControlButtonLabel" + nl;
+        sub += "}" + nl + nl;
+        return sub;
+    };
+
     std::string in = script;
+    if (l.main) {
+        // The disc's own mission selector on the main menu is its debug picker: the release script leaves its text
+        // off (0) and names none of the missions. Turn it on, give it the story, and have the host start the chosen
+        // mission; the "main" screen keeps its count, so no screen is added (the script is at the 64-screen cap).
+        const std::string off = "text \"TBS_MENU_ITEM_MS_MISSION_SELECT\" 0";
+        size_t enabled = 0;
+        for (size_t at = in.find(off); at != std::string::npos; at = in.find(off, at + 1)) {
+            in.replace(at + off.size() - 1, 1, "1");
+            enabled++;
+        }
+        const std::string selector = "name \"mission_selector\"";
+        const std::string briefing = "OnSelect gotoscreen \"mission_briefing\"";
+        struct Insert {
+            size_t at;
+            std::string text;
+        };
+        std::vector<Insert> inserts;
+        for (size_t at = in.find(selector); at != std::string::npos; at = in.find(selector, at + 1)) {
+            const size_t line = in.rfind('\n', at);
+            const size_t first = line == std::string::npos ? 0 : in.find_first_not_of(" \t", line + 1);
+            const std::string indent = in.substr(line + 1, first - (line + 1));
+            const size_t eol = in.find('\n', at);
+            if (eol == std::string::npos) break;
+            inserts.push_back({eol + 1, indent + "TextSelection \"\"" +
+                                             mission_keys(kStoryMissions, kStoryMissionCount, nullptr, 0) + nl});
+            // start the mission before the selector moves on to its briefing screen: the host calls the frontend's
+            // StartMission with the widget the click named (the screen's widgets are gone after the goto)
+            const size_t next = in.find("AddTextSelector", eol);
+            const size_t brief = in.find(briefing, eol);
+            if (brief != std::string::npos && (next == std::string::npos || brief < next)) {
+                const size_t start = in.rfind('\n', brief) + 1;
+                inserts.push_back({start, indent + "OnSelect function \"PCMissionStart\" \"mission_selector\"" + nl});
+            }
+        }
+        std::sort(inserts.begin(), inserts.end(), [](const Insert& a, const Insert& b) { return a.at > b.at; });
+        for (const Insert& i : inserts) in.insert(i.at, i.text);
+        if (!enabled || inserts.empty())
+            LOGW("display menu: %s has no mission selector to fill, its main menu stays as it is", l.file);
+    }
     std::vector<size_t> cheat_digits;  // the main menu's, where they are in the script: before Options, unmoved
     if (l.main) {
         const std::string link = "gotoscreen \"dev_cheats\"", target = std::string("gotoscreen \"") + kCheatScreen + "\"";
@@ -442,6 +540,10 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
     item += options_row(l.main ? "FEmain_left_item7" : "FEpause_text6",
                         "TBS_PC_CONTROLS", "pc_controls", l.main ? "7" : "6");
 
+    // the pause menu's Mission Select screen, on the row after Controls (the main menu's own mission selector is
+    // the disc's, wired above)
+    if (!l.main) item += options_row("FEpause_text8", "TBS_MENU_ITEM_MS_MISSION_SELECT", "pc_missions", "8");
+
     std::string sub;
     sub += "# PC display options (Hulk Recompiled): the selectors call back the host" + nl;
     std::vector<size_t> digits;  // within sub
@@ -486,6 +588,7 @@ std::optional<Script> EditScript(const std::string& script, const Layout& l) {
         sub += cheat_values(at);
         for (size_t a : at) digits.push_back(values_at + a);
         sub += cheat_screen();
+        sub += mission_screen();
     }
     // Consolidating the eight cheat selectors preserves all settings and frees one of
     // the retail frontend's 64 screen slots for the native Controls page.
@@ -943,6 +1046,12 @@ void RegisterDisplayCallbacks(X86Context& ctx) {
     for (int i = 0; i < kCheatRowCount; i++)
         callbacks.emplace_back(std::string("PCCheat") + kCheatRows[i].name + "Changed", kCheatOwnerBase + i, false);
     callbacks.emplace_back(kCheatSyncName, kCheatSyncOwner, true);
+    // Mission / Free-Roam quick select (mission_menu.h): the main menu's mission_selector, the pause menu's screen
+    callbacks.emplace_back("PCMissionStart", kMissionStartOwner, true);
+    callbacks.emplace_back("PCMissionSelect", kMissionSelectOwner, true);
+    callbacks.emplace_back("PCMissionSync", kMissionSyncOwner, true);
+    callbacks.emplace_back("PCMissionPageChanged", kMissionPageOwner, false);
+    callbacks.emplace_back("PCMissionSelectedChanged", kMissionSelectedOwner, false);
     const uint32_t esp = ctx.esp;
     for (const auto& [name, owner, sync] : callbacks) {
         // the name only lives through the call, below the guest's stack
@@ -956,6 +1065,7 @@ void RegisterDisplayCallbacks(X86Context& ctx) {
         kernel::CallGuest(ctx, sync ? kRegisterCallback : kRegisterIntCallback, {ctx.esp, functor});
     }
     ctx.esp = esp;
+    AddValidMissions(ctx);
     RegisterControlsCallbacks(ctx);
 }
 
@@ -977,6 +1087,7 @@ void SetSelector(X86Context& ctx, const char* name, uint32_t choice) {
 }  // namespace
 
 bool DisplaySync(X86Context& ctx, uint32_t owner) {
+    if (MissionCallback(ctx, owner)) return true;
     if (NativeControlsFunction(ctx, owner)) return true;
     if (owner == kCheatSyncOwner) {
         // the cheats' selectors show their levels, which the other menu (main or pause) may have changed
@@ -989,7 +1100,8 @@ bool DisplaySync(X86Context& ctx, uint32_t owner) {
     return true;
 }
 
-bool DisplayCallback(uint32_t owner, uint32_t value) {
+bool DisplayCallback(X86Context& ctx, uint32_t owner, uint32_t value) {
+    if (MissionValue(ctx, owner, value)) return true;
     if (NativeControlsValue(owner, value)) return true;
     if (owner >= kCheatOwnerBase && owner < kCheatOwnerBase + uint32_t(kCheatRowCount)) {
         const CheatRow& r = kCheatRows[owner - kCheatOwnerBase];

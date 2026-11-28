@@ -1,0 +1,241 @@
+diff --git a/runtime/gpu/d3d11.cpp b/runtime/gpu/d3d11.cpp
+--- a/runtime/gpu/d3d11.cpp
++++ b/runtime/gpu/d3d11.cpp
+@@ -2775,7 +2775,12 @@ void D3D11Backend::Present(const Surface& front) {
+ }
+ 
+ void D3D11Backend::ApplySettings() {
+-    if (texturedumper::Update()) pack_textures_.clear();
++    // off or a new pack: the pack's images go at once and the draws that follow bind their own
++    if (texturedumper::Update()) {
++        pack_textures_.clear();
++        ID3D11ShaderResourceView* none[4] = {};
++        ctx_->PSSetShaderResources(0, 4, none);  // a draw may still have a pack image bound
++    }
+     float want = app::RenderScale(guest_h_);
+     if (std::fabs(want - scale_) > 1e-4f) {
+         ctx_->OMSetRenderTargets(0, nullptr, nullptr);
+diff --git a/runtime/gpu/d3d12.cpp b/runtime/gpu/d3d12.cpp
+--- a/runtime/gpu/d3d12.cpp
++++ b/runtime/gpu/d3d12.cpp
+@@ -3357,6 +3357,8 @@ void D3D12Backend::WaitGpuFrame(uint64_t n) {
+ }
+ 
+ void D3D12Backend::ApplySettings() {
++    // off or a new pack: the pack's copies are released as the frames in flight complete, and every texture lets go
++    // of its key so the draws that follow ask for the pack as it is now
+     if (texturedumper::Update()) ReleasePackTextures();
+     float want = app::RenderScale(guest_h_);
+     bool remake = ext_ && ext_->Settings();
+diff --git a/runtime/gpu/texturedumper.cpp b/runtime/gpu/texturedumper.cpp
+--- a/runtime/gpu/texturedumper.cpp
++++ b/runtime/gpu/texturedumper.cpp
+@@ -63,14 +63,22 @@ struct Latched {
+     bool operator==(const Latched&) const = default;
+ };
+ 
++// A folder the pack is read from: textures\hd and textures\replacement hold images in subfolders, textures\ itself
++// only loose ones, so its dumps\ stays the dumper's. They are searched in order: the first folder naming a texture
++// wins.
++struct Root {
++    fs::path dir;
++    bool subfolders = true;
++    HANDLE watch = INVALID_HANDLE_VALUE;  // changes under dir
++    uint32_t tries = 0;                   // presents between tries while the folder is missing
++};
++
+ struct Pack {
+     Latched set;
+     uint32_t generation = 1;
+-    fs::path pack_dir;
++    std::vector<Root> roots;  // written by Update alone
+     fs::path dump_dir;
+     std::unordered_map<uint64_t, fs::path> files;  // by the key in their names; written by Update alone
+-    HANDLE watch = INVALID_HANDLE_VALUE;           // changes under pack_dir
+-    uint32_t watch_tries = 0;
+     std::optional<Clock::time_point> changed;      // the last change seen, not listed yet
+     std::once_flag worker;
+     std::mutex lock;                               // everything below
+@@ -177,17 +185,39 @@ std::string Utf8(const fs::path& p) {
+     return std::string(s.begin(), s.end());
+ }
+ 
+-void ListPack(const fs::path& dir) {
+-    g.files.clear();
+-    std::error_code ec;
+-    fs::recursive_directory_iterator it(dir, ec);
+-    for (; !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+-        const fs::path& p = it->path();
+-        bool image = _wcsicmp(p.extension().c_str(), L".dds") == 0 || _wcsicmp(p.extension().c_str(), L".png") == 0;
+-        uint64_t key = image ? KeyInName(p.stem().wstring()) : 0;
++// the key in a file's name, 0 when it is not an image named for a texture
++uint64_t ImageKey(const fs::path& p) {
++    bool image = _wcsicmp(p.extension().c_str(), L".dds") == 0 || _wcsicmp(p.extension().c_str(), L".png") == 0;
++    return image ? KeyInName(p.stem().wstring()) : 0;
++}
++
++// one root's images into g.files; a key an earlier root has already named is left as it is
++void ListRoot(const Root& r) {
++    auto add = [](const fs::path& p) {
++        uint64_t key = ImageKey(p);
+         if (key) g.files.emplace(key, p);
++    };
++    std::error_code ec;
++    if (r.subfolders) {
++        fs::recursive_directory_iterator it(r.dir, ec);
++        for (; !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) add(it->path());
++    } else {
++        // loose images only: textures\dumps\ and the packs' own folders hold no top-level file
++        fs::directory_iterator it(r.dir, ec);
++        for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
++            std::error_code type_ec;
++            if (!it->is_regular_file(type_ec)) continue;
++            add(it->path());
++        }
+     }
+-    LOGR("texture pack: %zu images in %s", g.files.size(), Utf8(dir).c_str());
++}
++
++// the roots in pack order: the HD folder first, then the old replacement one, then loose images in textures itself
++void ListPacks() {
++    g.files.clear();
++    if (g.roots.empty()) return;
++    for (const Root& r : g.roots) ListRoot(r);
++    LOGR("texture pack: %zu images in %s", g.files.size(), Utf8(g.roots.back().dir).c_str());
+ }
+ 
+ // DDS files
+@@ -516,51 +546,77 @@ void GenerateCanyonMipmaps(uint64_t key, uint32_t revision, Image img) {
+     StoreLoaded(key, revision, std::move(img));
+ }
+ 
++// closes every pack folder's change handle: nothing of the pack is watched while replacement is off
++void CloseWatches() {
++    for (Root& r : g.roots) {
++        if (r.watch == INVALID_HANDLE_VALUE) continue;
++        FindCloseChangeNotification(r.watch);
++        r.watch = INVALID_HANDLE_VALUE;
++    }
++}
++
+ // the settings into g.set; false when none changed
+ bool LatchSettings() {
+     const app::Settings& s = app::Get();
+     Latched now{s.custom_textures, s.dump_textures, s.texture_dump_format};
+     if (now == g.set) return false;
+     g.set = now;
++    CloseWatches();  // the folders are made again below
+     fs::path root = app::ExeDir() / "textures";
+-    g.pack_dir = root / "replacement";
++    // The HD pack first, the old replacement folder next, then loose images in textures\ itself. The folders are
++    // listed in this order and the first one naming a texture wins, so an HD pack shadows a replacement beside it.
++    g.roots = {{root / "hd", true}, {root / "replacement", true}, {root, false}};
+     if (now.dumping) {
+         g.dump_dir = root / "dumps";
+         std::error_code ec;
+         fs::create_directories(g.dump_dir, ec);
+-        fs::create_directories(g.pack_dir, ec);  // ready for the edited images
++        fs::create_directories(root / "replacement", ec);  // ready for the edited images
+         LOGR("texture dump: %s into %s", now.format == kDumpDds ? "DDS" : "PNG", Utf8(g.dump_dir).c_str());
+     }
+-    // a texture dumped in the other format is dumped again
++    // replacement off costs nothing: its watches are closed and its files and loads dropped, so the renderer's next
++    // Update releases the pack's GPU copies
++    if (!now.replacing) {
++        g.changed.reset();
++        g.files.clear();
++    }
+     std::lock_guard l(g.lock);
+-    g.dumped.clear();
++    if (!now.replacing) {
++        g.revision++;  // a load started before the pack was closed is dropped
++        g.asked.clear();
++        g.loaded.clear();
++    }
++    g.dumped.clear();  // a texture dumped in the other format is dumped again
+     return true;
+ }
+ 
+-// the pack folder's change handle, tried again now and then while the folder is missing; once made the pack is
+-// listed at once
+-void EnsureWatch() {
+-    if (g.watch != INVALID_HANDLE_VALUE || g.watch_tries++ % kWatchRetry) return;
+-    g.watch = FindFirstChangeNotificationW(g.pack_dir.c_str(), TRUE, kPackChanges);
+-    if (g.watch != INVALID_HANDLE_VALUE) g.changed = Clock::time_point{};
++// a change handle per pack folder, tried again now and then while the folder is missing; once one is made the pack
++// is listed at once
++void EnsureWatches() {
++    for (Root& r : g.roots) {
++        if (r.watch != INVALID_HANDLE_VALUE || r.tries++ % kWatchRetry) continue;
++        r.watch = FindFirstChangeNotificationW(r.dir.c_str(), r.subfolders ? TRUE : FALSE, kPackChanges);
++        if (r.watch != INVALID_HANDLE_VALUE) g.changed = Clock::time_point{};
++    }
+ }
+ 
+-void NoteFolderChange(Clock::time_point now) {
+-    if (g.watch == INVALID_HANDLE_VALUE || WaitForSingleObject(g.watch, 0) != WAIT_OBJECT_0) return;
+-    g.changed = now;
+-    if (FindNextChangeNotification(g.watch)) return;
+-    FindCloseChangeNotification(g.watch);  // the folder went away
+-    g.watch = INVALID_HANDLE_VALUE;
++void NoteFolderChanges(Clock::time_point now) {
++    for (Root& r : g.roots) {
++        if (r.watch == INVALID_HANDLE_VALUE || WaitForSingleObject(r.watch, 0) != WAIT_OBJECT_0) continue;
++        g.changed = now;
++        if (FindNextChangeNotification(r.watch)) continue;
++        FindCloseChangeNotification(r.watch);  // the folder went away
++        r.watch = INVALID_HANDLE_VALUE;
++    }
+ }
+ 
+-// lists the pack once its folder is watched, then again once its files changed and settled; true when listed
++// lists the packs once their folders are watched, then again once their files changed and settled; true when listed
+ bool UpdatePackFiles() {
+     Clock::time_point now = Clock::now();
+-    EnsureWatch();
+-    NoteFolderChange(now);
++    EnsureWatches();
++    NoteFolderChanges(now);
+     if (!g.changed || now - *g.changed < kSettle) return false;
+     g.changed.reset();
+-    ListPack(g.pack_dir);
++    ListPacks();
+     std::lock_guard l(g.lock);
+     g.revision++;
+     g.asked.clear();
+@@ -574,7 +630,7 @@ bool Update() {
+     bool changed = LatchSettings();
+     bool reloaded = g.set.replacing && UpdatePackFiles();
+     if (changed || reloaded) g.generation++;
+-    return reloaded;
++    return changed || reloaded;
+ }
+ 
+ uint32_t Generation() { return g.generation; }
+diff --git a/runtime/gpu/texturedumper.h b/runtime/gpu/texturedumper.h
+--- a/runtime/gpu/texturedumper.h
++++ b/runtime/gpu/texturedumper.h
+@@ -6,9 +6,10 @@
+ 
+ #include "gpu/texture.h"
+ 
+-// Texture packs and texture dumps. A console texture is named by a hash of its level 0 bytes, size and format; an
+-// image in textures\replacement\ beside the exe with that hash in its name is drawn in its place at any resolution,
+-// and textures\dumps\ gets each texture once as a PNG or DDS file to edit or upscale.
++// Texture packs and texture dumps. A console texture is named by a hash of its level 0 bytes, size and format. An
++// image with that hash in its name in textures\hd\ (recursively) beside the exe, else in the older
++// textures\replacement\, else loose in textures\ itself, is drawn in its place at any resolution, and
++// textures\dumps\ gets each texture once as a PNG or DDS file to edit or upscale.
+ namespace gpu::texturedumper {
+ 
+ // rows tightly packed, block rows for the BC formats
+@@ -28,7 +29,8 @@ struct Image {
+ enum class Lookup { None, Loading, Ready };
+ 
+ // latches the texture settings, the render thread's, and lists the pack again once its files changed.
+-// true then: every pack image loads anew, GPU copies made before are stale
++// true then: every pack image loads anew, GPU copies made before are stale; also when the settings changed, so
++// turning replacement off releases the pack's copies at once
+ bool Update();
+ // changes with any texture setting: every texture's key and pack image are looked up again
+ uint32_t Generation();

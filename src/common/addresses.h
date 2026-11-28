@@ -22,6 +22,8 @@ inline constexpr uint32_t kTextSelectorType = 0x0049DBBC;     // TextSelector ty
 inline constexpr uint32_t kHSliderVtable = 0x0040C48C;
 inline constexpr uint32_t kTextSelectorVtable = 0x0040C4E4;
 inline constexpr uint32_t kFrontend = 0x004E0A60;             // the FE manager
+inline constexpr uint32_t kAddValidMission = 0x000B4B60;      // thiscall (id, level): the FE's valid mission list
+inline constexpr uint32_t kStartMission = 0x000BC5C0;         // thiscall (mode, id, 1, 1): starts one of them
 inline constexpr uint32_t kApp = 0x004DD700;                  // the app, its flow manager at +0x54
 inline constexpr uint32_t kCameraInvertX = 0x004DD83A, kCameraInvertY = 0x004DD83B;
 inline constexpr uint32_t kFiberTlsIndex = 0x004E5A9C;
@@ -69,6 +71,19 @@ inline constexpr uint32_t kRenderManager = 0x004E231C;        // the render mana
 #define HULK_SUB_APPLY_FOG sub_001C2210        // thiscall render layer: the frame's fog and clear colour
 #define HULK_SUB_GET_LANGUAGE sub_00209F50     // XGetLanguage: the console's language (language.h)
 #define HULK_SUB_CHASE_CAM_UPDATE sub_000A75D0  // thiscall chase camera, its update (vtable +0x20; ret 0x10)
+// the game's own Lua 5.1 (common/lua_bridge.cpp, docs/lua-mods.md): the ScriptHandler singleton, which owns one
+// lua_State at +0x08, and the C API the bridge calls. Source: D:\Projects\Build Cache\hulk-issue23\lua-research\
+// addresses.md (static analysis of this XBE; the numbers have not been proven in game yet).
+inline constexpr uint32_t kScriptHandler = 0x004E23CC;      // ScriptHandler::Get's singleton, 0 before it exists
+inline constexpr uint32_t kScriptHandlerState = 0x08;       // the lua_State* inside it
+inline constexpr uint32_t kLuaLoadBuffer = 0x00339A60;      // int luaL_loadbuffer(L, chunk, len, name)
+inline constexpr uint32_t kLuaPcall = 0x002139F0;           // int lua_pcall(L, nargs, nresults, handler)
+inline constexpr uint32_t kLuaGetTop = 0x00212D70;          // int lua_gettop(L)
+inline constexpr uint32_t kLuaSetTop = 0x00212ED0;          // void lua_settop(L, index)
+inline constexpr uint32_t kLuaToString = 0x00213190;        // const char* lua_tostring(L, index)
+inline constexpr uint32_t kLuaToNumber = 0x002130E0;        // lua_Number lua_tonumber(L, index) in x87 st(0)
+inline constexpr uint32_t kLuaGetField = 0x00213600;        // void lua_getfield(L, index, key)
+inline constexpr uint32_t kLuaPushNumber = 0x00213340;      // void lua_pushnumber(L, lua_Number n)
 #else
 inline constexpr uint32_t kGuestNew = 0x0008D730;
 inline constexpr uint32_t kRegisterCallback = 0x000FC400;
@@ -84,6 +99,8 @@ inline constexpr uint32_t kTextSelectorType = 0x0049FCFC;
 inline constexpr uint32_t kHSliderVtable = 0x0040CF54;
 inline constexpr uint32_t kTextSelectorVtable = 0x0040CFAC;
 inline constexpr uint32_t kFrontend = 0x004E2BA0;
+inline constexpr uint32_t kAddValidMission = 0x000B4C30;      // thiscall (id, level): the FE's valid mission list
+inline constexpr uint32_t kStartMission = 0x000BC770;         // thiscall (mode, id, 1, 1): starts one of them
 inline constexpr uint32_t kApp = 0x004DF840;
 inline constexpr uint32_t kCameraInvertX = 0x004DF97A, kCameraInvertY = 0x004DF97B;
 inline constexpr uint32_t kFiberTlsIndex = 0x004E7BDC;
@@ -129,6 +146,19 @@ inline constexpr uint32_t kRenderManager = 0x004E445C;
 #define HULK_SUB_APPLY_FOG sub_001C2C20
 #define HULK_SUB_GET_LANGUAGE sub_0020AA00
 #define HULK_SUB_CHASE_CAM_UPDATE sub_000A76A0
+// the game's own Lua 5.1 (common/lua_bridge.cpp, docs/lua-mods.md): the ScriptHandler singleton, which owns one
+// lua_State at +0x08, and the C API the bridge calls. Source: D:\Projects\Build Cache\hulk-issue23\lua-research\
+// addresses.md (static analysis of this XBE; the numbers have not been proven in game yet).
+inline constexpr uint32_t kScriptHandler = 0x004E450C;      // ScriptHandler::Get's singleton, 0 before it exists
+inline constexpr uint32_t kScriptHandlerState = 0x08;       // the lua_State* inside it
+inline constexpr uint32_t kLuaLoadBuffer = 0x00214330;      // int luaL_loadbuffer(L, chunk, len, name)
+inline constexpr uint32_t kLuaPcall = 0x0032C320;           // int lua_pcall(L, nargs, nresults, handler)
+inline constexpr uint32_t kLuaGetTop = 0x0032B6A0;          // int lua_gettop(L)
+inline constexpr uint32_t kLuaSetTop = 0x0032B800;          // void lua_settop(L, index)
+inline constexpr uint32_t kLuaToString = 0x0032BAC0;        // const char* lua_tostring(L, index)
+inline constexpr uint32_t kLuaToNumber = 0x0032BA10;        // lua_Number lua_tonumber(L, index) in x87 st(0)
+inline constexpr uint32_t kLuaGetField = 0x0032BF30;        // void lua_getfield(L, index, key)
+inline constexpr uint32_t kLuaPushNumber = 0x0032BC70;      // void lua_pushnumber(L, lua_Number n)
 #endif
 }  // namespace hulk::addr
 

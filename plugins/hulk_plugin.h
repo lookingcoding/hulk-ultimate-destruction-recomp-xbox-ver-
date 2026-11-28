@@ -6,6 +6,11 @@
 // world update step, and calls OnUnload before it is let go. Build it 64-bit: the game is, and a
 // 32-bit DLL does not load into it.
 //
+// API v2 appends the game's own Lua 5.1 (LuaReady, RunLua, LuaGetNumber, LuaGetString, LuaLastError):
+// a chunk of the plugin's runs on the VM the disc's scripts run on, with the engine's whole script API.
+// The fields are appended and the host accepts version 1 as well, so a v1 plugin keeps loading unchanged.
+// A mod that only needs Lua does not need a DLL at all (docs/lua-mods.md).
+//
 //           plugins\ExampleTrainer.dll        one plugin, a file
 //           plugins\My Mod\Trainer.dll        one plugin in its own folder, beside its data files
 //           plugins\_Trainer.dll              a file whose name starts with _ or . is left out
@@ -17,7 +22,7 @@
 extern "C" {
 #endif
 
-#define HULK_PLUGIN_API_VERSION 1
+#define HULK_PLUGIN_API_VERSION 2
 
 #if defined(_WIN32)
 #define HULK_PLUGIN_EXPORT __declspec(dllexport)
@@ -53,10 +58,19 @@ typedef struct HulkHostApi {
 
     // runs the game's own code at a guest address with stdcall arguments (OnTick's thread only)
     uint32_t (*CallGuest)(uint32_t fn, const uint32_t* args, uint32_t count);
+
+    // ---- v2: the game's own Lua 5.1, the VM its own scripts run on (src\common\lua_bridge.h). Every call here is
+    // an OnTick call: the VM is only settled on the game's update thread. The state is re-read on each call, so a
+    // pointer is never stale across a mission change. Appended, so a v1 plugin keeps working without these.
+    int (*LuaReady)(void);                                  // 1 when the game has a live Lua state
+    int (*RunLua)(const char* src, const char* chunkname);   // 0 ran, 1 did not compile, 2 raised, -1 did not run
+    int (*LuaGetNumber)(const char* expr, double* out);      // 1 and *out when expr is a number
+    int (*LuaGetString)(const char* expr, char* buf, int cap);  // 1 and the value in buf when it is a string
+    const char* (*LuaLastError)(void);                       // the last failing call's message, "" when none
 } HulkHostApi;
 
 typedef struct HulkPluginInfo {
-    uint32_t api_version;      // must be HULK_PLUGIN_API_VERSION, or the plugin is not loaded
+    uint32_t api_version;      // 1..HULK_PLUGIN_API_VERSION, or the plugin is not loaded
     const char* name;          // shown in the log; the file name when it is not there
     const char* author;        // optional
     const char* version;       // optional

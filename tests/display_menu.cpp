@@ -1,5 +1,6 @@
 #include "common/bindings.h"
 #include "common/binding_prompts.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -14,6 +15,7 @@
 #include "common/native_controls.h"
 #include "common/cheats.h"
 #include "common/language.h"
+#include "common/mission_menu.h"
 #include "common/rcf.h"
 #include "common/view.h"
 #include "kernel/kernel.h"
@@ -42,8 +44,11 @@ static std::vector<std::pair<std::string, std::vector<uint32_t>>> registered;  /
 static uint32_t next_alloc = 0x10000;
 // the screen's widgets: name -> address, each a TextSelector whose vtable's SetSelection is kSetSelection
 static std::vector<std::string> widgets;
+static std::map<std::string, uint32_t> widget_of;  // a widget keeps its address while the screen is up
 static std::vector<std::pair<uint32_t, uint32_t>> selections;  // widget, index
-constexpr uint32_t kWidgets = 0x40000, kVtable = 0x50000, kSetSelection = 0x777000;
+static std::vector<std::string> valid_missions;  // AddValidMission(id, level)
+static std::vector<std::string> started;         // StartMission("oneshot", id, 1, 1)
+constexpr uint32_t kWidgets = 0x40000, kWIdgetStride = 0x200, kVtable = 0x50000, kSetSelection = 0x777000;
 uint32_t CallGuest(X86Context& ctx, uint32_t fn, const uint32_t* args, size_t count) {
     if (fn == 0x0008D730 && count == 1) {
         uint32_t p = next_alloc;
@@ -55,16 +60,31 @@ uint32_t CallGuest(X86Context& ctx, uint32_t fn, const uint32_t* args, size_t co
         return 0;
     }
     if (fn == 0x000FC480 && count == 1) {
-        widgets.push_back(reinterpret_cast<const char*>(g_base + args[0]));
-        uint32_t w = kWidgets + uint32_t(widgets.size()) * 16;
-        W32(w, kVtable);
-        W32(kVtable + 0x64, kSetSelection);
-        return w;
+        const std::string name = reinterpret_cast<const char*>(g_base + args[0]);
+        widgets.push_back(name);
+        auto it = widget_of.find(name);
+        if (it == widget_of.end()) {
+            const uint32_t w = kWidgets + uint32_t(widget_of.size() + 1) * kWIdgetStride;
+            W32(w, kVtable);
+            W32(kVtable + 0x64, kSetSelection);
+            it = widget_of.emplace(name, w).first;
+        }
+        return it->second;
     }
     if (fn == 0x00340764 && count == 5 && args[2] == 0x0049FCE4 && args[3] == 0x0049FCFC) return args[0];
     if (fn == kSetSelection && count == 1) {
         selections.push_back({ctx.ecx, args[0]});
+        W32(ctx.ecx + 0x154, args[0]);
         return 0;
+    }
+    if (fn == 0x000B4C30 && count == 2) {  // AddValidMission: the frontend's mission list
+        const std::string id = reinterpret_cast<const char*>(g_base + args[0]);
+        if (std::find(valid_missions.begin(), valid_missions.end(), id) == valid_missions.end()) valid_missions.push_back(id);
+        return 0;
+    }
+    if (fn == 0x000BC770 && count == 4) {  // StartMission: mode, id, 1, 1
+        started.push_back(reinterpret_cast<const char*>(g_base + args[1]));
+        return 1;
     }
     std::printf("unexpected guest call %08X\n", fn);
     return 0;
@@ -120,6 +140,7 @@ int main(int argc, char** argv) {
     app::settings.fps_cap = 90;  // not a choice: Custom
     app::settings.vsync = true;
     app::settings.render_percent = 100;
+    app::settings.custom_textures = true;  // the HD texture pack on
     hulk::SetFovIncrease(15);
     hulk::SetRenderDistance(250);  // not a choice: Custom
     hulk::SetLanguage(hulk::Language::Spanish);
@@ -234,15 +255,19 @@ int main(int argc, char** argv) {
     Check(scripts.size() == 2 && (tables.size() == 5 || tables.size() == 1) && moved == scripts.size() + tables.size(),
           "fe_real.txt, fe_run.txt and each string table moved");
     bool french_cheats = false;
+    bool french_textures = false;
     for (const std::string& t : tables) {
         Check(t.find("TBS_PC_DISPLAY_OPTIONS\t") != std::string::npos, "string tables have the menu's keys");
         Check(t.find("TBS_PC_CHEAT_INFINITE_RAGE\t") != std::string::npos && t.find("TBS_PC_BIND_PAGE\t") != std::string::npos &&
                   t.find("TBS_PC_DAMAGE_ONE_HIT\t") != std::string::npos && t.find("TBS_PC_SCALE_25\t") != std::string::npos,
               "string tables have the cheats' keys");
+        Check(t.find("TBS_PC_TEXTURE_PACK\t") != std::string::npos, "string tables have the texture pack's key");
         french_cheats |= t.find("TBS_PC_CHEAT_INFINITE_RAGE\tRage infinie") != std::string::npos;
+        french_textures |= t.find("TBS_PC_TEXTURE_PACK\tPack de textures HD") != std::string::npos;
         Check(t.find("TBS_MENU_ITEM_OM_CAMERA_OPTIONS\t") != std::string::npos, "string tables keep their own");
     }
     Check(tables.size() == 1 || french_cheats, "the cheats' lines in each language");
+    Check(tables.size() == 1 || french_textures, "the texture pack's line in each language");
     Check(tables[0].find("TBS_HINT_CAMERAS_2\tPress [F] to reset the camera") != std::string::npos,
           "camera reset hint uses its rebound action rather than generic mouse look");
     Check(tables[0].find("using [T] to cycle to the next available target") != std::string::npos &&
@@ -361,25 +386,75 @@ int main(int argc, char** argv) {
         Check(script->find("AddNamedValueInt \"PCRenderDistance\" 5 \"PCRenderDistanceChanged\"") != std::string::npos &&
                   script->find("TBS_PC_SCALE_400 TBS_PC_CUSTOM\r\n        NamedValue \"PCRenderDistance\"") != std::string::npos,
               "a render distance outside the choices is Custom");
+        Check(script->find("AddNamedValueInt \"PCTextures\" 0 \"PCTexturesChanged\"") != std::string::npos &&
+                  script->find("TBS_MENU_ITEM_CHOICE_OFF\r\n        NamedValue \"PCTextures\"") != std::string::npos,
+              "the HD texture pack's on/off row, on as the settings have it");
+        Check(script->find("        text \"TBS_PC_TEXTURE_PACK\" 1\r\n") != std::string::npos &&
+                  script->find("        text \"TBS_PC_TEXTURE_PACK\" 1\r\n") <
+                      script->find("        text \"TBS_PC_LANGUAGE\" 1\r\n"),
+              "its row comes right before Language's");
         Check(script->find("        OnHighlight function \"PCDisplaySync\"\r\n") != std::string::npos, "the selectors sync on highlight");
         Check(script->find("TBS_MENU_ITEM_NO TBS_MENU_ITEM_YES\r\n        NamedValue \"CameraInvertX\"") != std::string::npos &&
                   script->find("TBS_MENU_ITEM_NO TBS_MENU_ITEM_YES\r\n        NamedValue \"CameraInvertY\"") != std::string::npos,
               "Invert X and Y name the camera that looks up with the stick No");
     }
     Check(main_menu.find("AddTextButton \"FEmain_left_item5\"\r\n    {\r\n        text \"TBS_PC_DISPLAY_OPTIONS\"") != std::string::npos &&
-              main_menu.find("AddTextSelector \"FEsubMenu_text8\"") != std::string::npos,
+              main_menu.find("AddTextSelector \"FEsubMenu_text9\"") != std::string::npos,
           "the main menu's slots");
     Check(main_menu.find("ifplatform PS2 GAMECUBE\r\n{\r\n    AddTextSelector \"FEmain_left_item5\"") != std::string::npos,
           "the PS2 and GameCube widescreen row stays");
     Check(pause_menu.find("AddTextButton \"FEpause_text4\"\r\n    {\r\n        text \"TBS_PC_DISPLAY_OPTIONS\"") != std::string::npos &&
-              pause_menu.find("AddTextSelector \"FEpause_text8\"") != std::string::npos &&
-              pause_menu.find("        TransitionAnimEnter \"slide_down8\"") != std::string::npos,
+              pause_menu.find("AddTextSelector \"FEpause_text9\"") != std::string::npos &&
+              pause_menu.find("        TransitionAnimEnter \"slide_down9\"") != std::string::npos,
           "the pause menu's slots and select bars");
+
+    // Mission / Free-Roam quick select (mission_menu.cpp): the disc's own mission_selector on the main menu, and a
+    // Mission Select screen on the pause menu, both naming the missions by their TBS_C*M*_NAME keys
+    Check(main_menu.find("text \"TBS_MENU_ITEM_MS_MISSION_SELECT\" 0") == std::string::npos &&
+              main_menu.find("text \"TBS_MENU_ITEM_MS_MISSION_SELECT\" 1") != std::string::npos,
+          "the main menu's mission selector is shown");
+    Check(main_menu.find("        TextSelection \"\" TBS_C0M1_NAME TBS_C0M2_NAME") != std::string::npos ||
+              main_menu.find("            TextSelection \"\" TBS_C0M1_NAME TBS_C0M2_NAME") != std::string::npos,
+          "its rows are the story missions");
+    Check(main_menu.find("TBS_C7M3_NAME\r\n") != std::string::npos, "its last row is the last story mission");
+    Check(main_menu.find("OnSelect function \"PCMissionStart\" \"mission_selector\"") != std::string::npos,
+          "the host starts the chosen mission");
+    Check(main_menu.find("OnSelect function \"PCMissionStart\" \"mission_selector\"") <
+              main_menu.find("OnSelect gotoscreen \"mission_briefing\"", main_menu.find("name \"mission_selector\"")),
+          "the start runs while the selector's screen is still up");
+    Check(pause_menu.find("AddTextButton \"FEpause_text8\"\r\n    {\r\n        text \"TBS_MENU_ITEM_MS_MISSION_SELECT\"") !=
+                  std::string::npos &&
+              pause_menu.find("OnSelect gotoscreen \"pc_missions\"") != std::string::npos,
+          "the pause menu's Options has the Mission Select row at FEpause_text8");
+    const size_t missions = pause_menu.find("AddScreen \"pc_missions\"");
+    Check(missions != std::string::npos && missions < pause_menu.find("AddScreen \"pc_controls\""),
+          "the pause menu has the Mission Select screen");
+    if (missions != std::string::npos) {
+        const size_t end = pause_menu.find("AddScreen", missions + 1);
+        const std::string screen = pause_menu.substr(missions, end - missions);
+        Check(screen.find("$MACRO_INSERT typicalScreenSetup") != std::string::npos, "its native screen setup");
+        Check(screen.find("name \"pc_mission_page\"") != std::string::npos &&
+                  screen.find("TextSelection \"\" TBS_MENU_ITEM_MISSIONS TBS_MENU_ITEM_FREE_ROAM") != std::string::npos &&
+                  screen.find("NamedValue \"PCMissionPage\"") != std::string::npos,
+              "the Story / Free Roam toggle");
+        Check(screen.find("name \"pc_mission_selector\"") != std::string::npos &&
+                  screen.find("OnSelect function \"PCMissionSelect\" \"pc_mission_selector\"") != std::string::npos &&
+                  screen.find("OnHighlight function \"PCMissionSync\"") != std::string::npos,
+              "the mission rows start the chosen mission and sync the page");
+        Check(screen.find("TextSelection \"\" TBS_C0M1_NAME") != std::string::npos &&
+                  screen.find("TBS_C10M45_NAME\r\n") != std::string::npos,
+              "its rows are every story and challenge mission");
+    }
+    // all 75 mission names the two tables name are in the disc's English string table
+    for (const hulk::Mission& m : hulk::kStoryMissions)
+        Check(tables[0].find(std::string(m.name_key) + "\t") != std::string::npos, m.name_key);
+    for (const hulk::Mission& m : hulk::kFreeRoamMissions)
+        Check(tables[0].find(std::string(m.name_key) + "\t") != std::string::npos, m.name_key);
     if (argc > 2) std::ofstream(argv[2], std::ios::binary).write(main_menu.data(), std::streamsize(main_menu.size()));
     if (argc > 3) std::ofstream(argv[3], std::ios::binary).write(pause_menu.data(), std::streamsize(pause_menu.size()));
 
     // the selectors' callbacks: registered after the game's own, then called with the selection
-    std::vector<uint8_t> memory(0x100000);
+    std::vector<uint8_t> memory(0x500000);  // the frontend's manager at addr::kFrontend, 0x004E2BA0
     kernel::g_base = memory.data();
     {
         auto map = hulk::bindings::Defaults();
@@ -395,36 +470,56 @@ int main(int argc, char** argv) {
 
     X86Context ctx{};
     ctx.esp = 0x80000;
+    kernel::W32(0x004E2BA0, 0x9000);  // the frontend's manager (addr::kFrontend, the European release)
     hulk::RegisterDisplayCallbacks(ctx);
     Check(ctx.esp == 0x80000, "the guest's stack is as it was");
-    Check(kernel::registered.size() == 32, "display and cheat callbacks plus the Controls entry");
-    if (kernel::registered.size() == 32) {
+    Check(kernel::registered.size() == 38, "display, cheat and mission callbacks plus the Controls entry");
+    if (kernel::registered.size() == 38) {
         Check(kernel::registered[1].first == "PCResolutionChanged", "named as the script names them");
         Check(kernel::registered[1].second == std::vector<uint32_t>({0x409B40, 0x101, 0xBBEC0}), "functor through the shared handler");
         Check(kernel::registered[6].first == "PCRenderDistanceChanged", "the render distance's");
-        Check(kernel::registered[7].first == "PCLanguageChanged", "the language's");
-        Check(kernel::registered[8].first == "PCDisplaySync", "the sync");
-        Check(kernel::registered[8].second == std::vector<uint32_t>({0x409B30, 0x108, 0xB46B0}), "sync through Print");
-        Check(kernel::registered[9].first == "PCCheatInvulnerabilityChanged" &&
-                  kernel::registered[9].second == std::vector<uint32_t>({0x409B40, 0x120, 0xBBEC0}),
+        Check(kernel::registered[7].first == "PCTexturesChanged" &&
+                  kernel::registered[7].second == std::vector<uint32_t>({0x409B40, 0x107, 0xBBEC0}),
+              "the texture pack's");
+        Check(kernel::registered[8].first == "PCLanguageChanged", "the language's");
+        Check(kernel::registered[9].first == "PCDisplaySync", "the sync");
+        Check(kernel::registered[9].second == std::vector<uint32_t>({0x409B30, 0x109, 0xB46B0}), "sync through Print");
+        Check(kernel::registered[10].first == "PCCheatInvulnerabilityChanged" &&
+                  kernel::registered[10].second == std::vector<uint32_t>({0x409B40, 0x120, 0xBBEC0}),
               "the cheats' callbacks through the shared handler");
-        Check(kernel::registered[13].first == "PCCheatDamageChanged" && kernel::registered[13].second[1] == 0x124, "the damage's");
-        Check(kernel::registered[17].first == "PCCheatSync" &&
-                  kernel::registered[17].second == std::vector<uint32_t>({0x409B30, 0x11F, 0xB46B0}),
+        Check(kernel::registered[14].first == "PCCheatDamageChanged" && kernel::registered[14].second[1] == 0x124, "the damage's");
+        Check(kernel::registered[18].first == "PCCheatSync" &&
+                  kernel::registered[18].second == std::vector<uint32_t>({0x409B30, 0x11F, 0xB46B0}),
               "the cheats' sync through Print");
+        Check(kernel::registered[19].first == "PCMissionStart" &&
+                  kernel::registered[19].second == std::vector<uint32_t>({0x409B30, 0x172, 0xB46B0}),
+              "the main menu's mission start through Print");
+        Check(kernel::registered[20].first == "PCMissionSelect" && kernel::registered[20].second[1] == 0x171,
+              "the pause menu's mission select");
+        Check(kernel::registered[21].first == "PCMissionSync" && kernel::registered[21].second[1] == 0x170,
+              "the mission screen's sync");
+        Check(kernel::registered[22].first == "PCMissionPageChanged" &&
+                  kernel::registered[22].second == std::vector<uint32_t>({0x409B40, 0x173, 0xBBEC0}),
+              "the Story / Free Roam toggle");
+        Check(kernel::registered[23].first == "PCMissionSelectedChanged" && kernel::registered[23].second[1] == 0x174,
+              "the chosen row");
     }
     Check(kernel::registered.back().first == "PCBindingPageChanged", "native Controls callbacks registered");
+    // every mission of the disc is in the frontend's valid list, which StartMission checks
+    Check(kernel::valid_missions.size() == 75 && kernel::valid_missions.front() == "c00m01" &&
+              kernel::valid_missions.back() == "c10m45",
+          "the frontend's valid list has the 35 story and 40 challenge missions");
     Check(!hulk::DisplaySync(ctx, 0x00123456), "a real Print owner goes to the game");
     ctx.ecx = 0xABCD;
-    Check(hulk::DisplaySync(ctx, 0x108), "the sync");
+    Check(hulk::DisplaySync(ctx, 0x109), "the sync");
     Check(ctx.esp == 0x80000 && ctx.ecx == 0xABCD, "the sync leaves the registers as they were");
     Check(kernel::widgets == std::vector<std::string>({"pc_display_mode_selector", "pc_resolution_selector",
                                                         "pc_frame_rate_selector", "pc_vsync_selector", "pc_render_scale_selector",
                                                         "pc_fov_selector", "pc_render_distance_selector",
-                                                        "pc_language_selector"}),
+                                                        "pc_textures_selector", "pc_language_selector"}),
           "each selector found by its name");
-    Check(kernel::selections == std::vector<std::pair<uint32_t, uint32_t>>({{0x40010, 1}, {0x40020, 3}, {0x40030, 6}, {0x40040, 0}, {0x40050, 2},
-                                                                                 {0x40060, 3}, {0x40070, 5}, {0x40080, 2}}),
+    Check(kernel::selections == std::vector<std::pair<uint32_t, uint32_t>>({{0x40200, 1}, {0x40400, 3}, {0x40600, 6}, {0x40800, 0}, {0x40A00, 2},
+                                                                                 {0x40C00, 3}, {0x40E00, 5}, {0x41000, 0}, {0x41200, 2}}),
           "each set to the current setting");
     // the cheats' sync sets each cheat selector of the screen to its level; a choice selects the level and saves
     kernel::widgets.clear();
@@ -436,33 +531,67 @@ int main(int argc, char** argv) {
     Check(kernel::selections.size() == 8 && kernel::selections[1].second == 1 && kernel::selections[4].second == 2 &&
               kernel::selections[0].second == 0,
           "each set to its cheat's level");
-    Check(hulk::DisplayCallback(0x124, 3) && hulk::cheats::Level(hulk::cheats::Cheat::Damage) == 3, "one-hit kills chosen");
-    Check(hulk::DisplayCallback(0x120, 1) && hulk::cheats::Level(hulk::cheats::Cheat::Invulnerability) == 1, "invulnerability on");
-    Check(hulk::DisplayCallback(0x120, 0) && hulk::cheats::Level(hulk::cheats::Cheat::Invulnerability) == 0, "and off again");
-    Check(hulk::DisplayCallback(0x124, 7) && hulk::cheats::Level(hulk::cheats::Cheat::Damage) == 3, "a choice past a cheat's is ignored");
-    Check(!hulk::DisplayCallback(0x128, 1), "past the cheats' owners goes to the game");
-    Check(!hulk::DisplayCallback(0x00123456, 1), "a real AudioQuality owner goes to the game");
-    Check(hulk::DisplayCallback(0x101, 5), "resolution selector");
+    Check(hulk::DisplayCallback(ctx, 0x124, 3) && hulk::cheats::Level(hulk::cheats::Cheat::Damage) == 3, "one-hit kills chosen");
+    Check(hulk::DisplayCallback(ctx, 0x120, 1) && hulk::cheats::Level(hulk::cheats::Cheat::Invulnerability) == 1, "invulnerability on");
+    Check(hulk::DisplayCallback(ctx, 0x120, 0) && hulk::cheats::Level(hulk::cheats::Cheat::Invulnerability) == 0, "and off again");
+    Check(hulk::DisplayCallback(ctx, 0x124, 7) && hulk::cheats::Level(hulk::cheats::Cheat::Damage) == 3, "a choice past a cheat's is ignored");
+    Check(!hulk::DisplayCallback(ctx, 0x128, 1), "past the cheats' owners goes to the game");
+    Check(!hulk::DisplayCallback(ctx, 0x00123456, 1), "a real AudioQuality owner goes to the game");
+    Check(hulk::DisplayCallback(ctx, 0x101, 5), "resolution selector");
     Check(app::settings.width == 3840 && app::settings.height == 2160, "3840 x 2160 chosen");
-    Check(hulk::DisplayCallback(0x100, 2) && app::settings.display_mode == app::DisplayMode::Windowed, "windowed chosen");
-    Check(hulk::DisplayCallback(0x101, 99) && app::settings.width == 3840, "a selection past the choices is ignored");
+    Check(hulk::DisplayCallback(ctx, 0x100, 2) && app::settings.display_mode == app::DisplayMode::Windowed, "windowed chosen");
+    Check(hulk::DisplayCallback(ctx, 0x101, 99) && app::settings.width == 3840, "a selection past the choices is ignored");
     hulk::TickDisplaySettings();
     Check(app::applied == 0, "changes wait to settle");
     // the view's settings apply at once, without the window's
     const uint32_t generation = hulk::ViewGeneration();
-    Check(hulk::DisplayCallback(0x105, 5) && hulk::GetFovIncrease() == 30 && hulk::ViewGeneration() != generation,
+    Check(hulk::DisplayCallback(ctx, 0x105, 5) && hulk::GetFovIncrease() == 30 && hulk::ViewGeneration() != generation,
           "+30 field of view applies at once");
-    Check(hulk::DisplayCallback(0x106, 2) && hulk::GetRenderDistance() == 200, "200% render distance applies at once");
-    Check(hulk::DisplayCallback(0x107, 3) && hulk::GetLanguage() == hulk::Language::Italian, "Italian chosen");
-    Check(app::applied == 0, "neither applies the window");
+    Check(hulk::DisplayCallback(ctx, 0x106, 2) && hulk::GetRenderDistance() == 200, "200% render distance applies at once");
+    Check(hulk::DisplayCallback(ctx, 0x107, 1) && !app::settings.custom_textures, "the HD texture pack off");
+    Check(hulk::DisplayCallback(ctx, 0x108, 3) && hulk::GetLanguage() == hulk::Language::Italian, "Italian chosen");
+    Check(app::applied == 0, "none of them applies the window");
     std::vector<uint8_t> after = served();
     std::string again(after.begin(), after.end());
     Check(again.find("AddNamedValueInt \"PCResolution\" 5 \"PCResolutionChanged\"") != std::string::npos &&
               again.find("AddNamedValueInt \"PCDisplayMode\" 2 \"PCDisplayModeChanged\"") != std::string::npos,
           "the script read again starts at the settings as they are");
+    Check(again.find("AddNamedValueInt \"PCTextures\" 1 \"PCTexturesChanged\"") != std::string::npos,
+          "the texture pack's row starts at the settings as they are");
     Check(again.find("AddNamedValueInt \"PCCheatDamage\" 3 \"PCCheatDamageChanged\"") != std::string::npos,
           "the script read again starts at the cheats' levels as they are");
     Check(again.size() == rcf.size(), "the archive keeps its size");
+
+    // Mission / Free-Roam quick select (mission_menu.cpp): the pause menu's rows, the page toggle, and the disc's own
+    // selector on the main menu, each starting the mission through the frontend's StartMission
+    kernel::widgets.clear();
+    kernel::selections.clear();
+    kernel::started.clear();
+    Check(hulk::DisplaySync(ctx, hulk::kMissionSyncOwner) && ctx.esp == 0x80000 && ctx.ecx == 0xABCD,
+          "the mission screen's sync");
+    Check(kernel::widgets == std::vector<std::string>({"pc_mission_selector", "pc_mission_page"}) &&
+              kernel::selections.size() == 1 && kernel::selections[0].second == 0,
+          "its first row is the story's first mission and the toggle says Story");
+    kernel::selections.clear();
+    Check(hulk::DisplayCallback(ctx, hulk::kMissionPageOwner, 1), "Free Roam chosen");
+    Check(kernel::selections.size() == 2 && kernel::selections[0].first == kernel::widget_of["pc_mission_page"] &&
+              kernel::selections[0].second == 1 && kernel::selections[1].first == kernel::widget_of["pc_mission_selector"] &&
+              kernel::selections[1].second == 35,
+          "the toggle shows Free Roam and the list starts at the first challenge");
+    kernel::selections.clear();
+    Check(hulk::DisplayCallback(ctx, hulk::kMissionSelectedOwner, 60) && kernel::selections.size() == 1 &&
+              kernel::selections[0].second == 1,
+          "a challenge row keeps the toggle on Free Roam");
+    kernel::W32(kernel::widget_of["pc_mission_selector"] + hulk::kSelectorSelection, 40);
+    Check(hulk::DisplaySync(ctx, hulk::kMissionSelectOwner) && kernel::started == std::vector<std::string>({"c10m06"}),
+          "the pause menu starts the chosen mission through StartMission");
+    Check(hulk::DisplaySync(ctx, hulk::kMissionStartOwner) && kernel::started.back() == "c00m01",
+          "the main menu starts the mission its own selector shows");
+    kernel::W32(kernel::widget_of["mission_selector"] + hulk::kSelectorSelection, 34);
+    Check(hulk::DisplaySync(ctx, hulk::kMissionStartOwner) && kernel::started.back() == "c07m03",
+          "and the last story mission at its last row");
+    Check(kernel::valid_missions.size() == 75, "the frontend's list is still the 75 missions");
+    Check(!hulk::DisplaySync(ctx, 0x00123456), "a real Print owner still goes to the game");
 
 
     // the view's arithmetic: degrees added to the game's horizontal field, the planes scaled

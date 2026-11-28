@@ -14,6 +14,7 @@
 #include <vector>
 #include "app/app.h"
 #include "common/addresses.h"
+#include "common/lua_bridge.h"
 #include "common/replay.h"
 #include "core/log.h"
 #include "kernel/kernel.h"
@@ -55,6 +56,11 @@ void SetGameSpeed(float scale);
 int ReadMem(uint32_t va, void* dst, uint32_t n);
 int WriteMem(uint32_t va, const void* src, uint32_t n);
 uint32_t CallGuest(uint32_t fn, const uint32_t* args, uint32_t count);
+int LuaReady();
+int RunLua(const char* src, const char* chunkname);
+int LuaGetNumber(const char* expr, double* out);
+int LuaGetString(const char* expr, char* buf, int cap);
+const char* LuaLastError();
 
 HulkHostApi g_host = [] {
     HulkHostApi host {};
@@ -71,6 +77,11 @@ HulkHostApi g_host = [] {
     host.ReadMem = &ReadMem;
     host.WriteMem = &WriteMem;
     host.CallGuest = &CallGuest;
+    host.LuaReady = &LuaReady;
+    host.RunLua = &RunLua;
+    host.LuaGetNumber = &LuaGetNumber;
+    host.LuaGetString = &LuaGetString;
+    host.LuaLastError = &LuaLastError;
     return host;
 }();
 
@@ -228,6 +239,26 @@ uint32_t CallGuest(uint32_t fn, const uint32_t* args, uint32_t count) {
     return kernel::CallGuest(*t->ctx, fn, stack, count);
 }
 
+// ---------------------------------------------------------------- v2: the game's Lua (common/lua_bridge.cpp)
+
+int LuaReady() { return hulk::lua::Ready() ? 1 : 0; }
+
+int RunLua(const char* src, const char* chunkname) {
+    if (!src) return -1;
+    return hulk::lua::Run(src, std::strlen(src), chunkname && *chunkname ? chunkname : "@plugin");
+}
+
+int LuaGetNumber(const char* expr, double* out) {
+    float value = 0;
+    if (!out || !hulk::lua::GetNumber(expr, &value)) return 0;
+    *out = double(value);
+    return 1;
+}
+
+int LuaGetString(const char* expr, char* buf, int cap) { return hulk::lua::GetString(expr, buf, cap) ? 1 : 0; }
+
+const char* LuaLastError() { return hulk::lua::LastError(); }
+
 // ---------------------------------------------------------------- faults
 
 // the filter records the fault against the plugin the call was made for, and disables it once it has
@@ -320,8 +351,8 @@ void LoadPlugin(const fs::path& path) {
     if (!query)
         query = reinterpret_cast<QueryFn*>(reinterpret_cast<void*>(GetProcAddress(module, "_HulkPluginQuery")));
     const HulkPluginInfo* info = query ? query() : nullptr;
-    if (!info || info->api_version != HULK_PLUGIN_API_VERSION) {
-        LOGW("plugins: %s is built for API version %u, this game has %u, left out",
+    if (!info || !info->api_version || info->api_version > HULK_PLUGIN_API_VERSION) {
+        LOGW("plugins: %s is built for API version %u, this game has 1 to %u, left out",
              path.filename().string().c_str(), info ? info->api_version : 0, HULK_PLUGIN_API_VERSION);
         FreeLibrary(module);
         return;

@@ -36,7 +36,7 @@ void MenuButtonPrompts(uint32_t owner);
 // registers the frontend callbacks of the selectors, after the game's own (hooks.cpp)
 void RegisterDisplayCallbacks(X86Context& ctx);
 // a frontend int callback through the shared handler: true when it was one of the display selectors
-bool DisplayCallback(uint32_t owner, uint32_t value);
+bool DisplayCallback(X86Context& ctx, uint32_t owner, uint32_t value);
 // a frontend function call through the shared handler: true when it was the screen's, which sets each selector to
 // the current setting as the game's own code does for its screens
 bool DisplaySync(X86Context& ctx, uint32_t owner);

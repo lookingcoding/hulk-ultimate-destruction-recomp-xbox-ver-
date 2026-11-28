@@ -66,7 +66,7 @@ add_test(NAME keyboard_input_lifecycle_usa COMMAND hulk_input_usa_tests)
 add_executable(hulk_kernel_io_tests tests/kernel_io.cpp ${SDK}/runtime/kernel/io_completion.cpp)
 target_include_directories(hulk_kernel_io_tests PRIVATE ${SDK}/runtime)
 add_test(NAME kernel_io_completion COMMAND hulk_kernel_io_tests)
-add_executable(hulk_display_menu_tests tests/display_menu.cpp src/common/display_menu.cpp src/common/cheats.cpp src/common/view.cpp
+add_executable(hulk_display_menu_tests tests/display_menu.cpp src/common/display_menu.cpp src/common/mission_menu.cpp src/common/cheats.cpp src/common/view.cpp
     src/common/rcf.cpp src/common/language.cpp src/common/native_controls.cpp src/common/bindings.cpp src/common/binding_prompts.cpp)
 target_include_directories(hulk_display_menu_tests PRIVATE src ${SDK}/runtime)
 target_link_libraries(hulk_display_menu_tests PRIVATE tomlplusplus::tomlplusplus)

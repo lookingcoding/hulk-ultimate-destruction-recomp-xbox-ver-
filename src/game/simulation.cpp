@@ -4,6 +4,7 @@
 #include "common/simulation.h"
 #include "common/addresses.h"
 #include "common/cheats.h"
+#include "common/lua_mods.h"
 #include "common/plugins.h"
 #include "core/log.h"
 #include "gpu/backend.h"
@@ -109,6 +110,7 @@ X86_FUNC(WORLD_UPDATE) {
         hulk::g_world_dt = elapsed;  // the update runs with its own elapsed, as the console did
         WORLD_UPDATE_ORIGINAL(ctx, base);
         hulk::plugins::Tick(hulk::g_world_dt);  // plugins.h: after the world's update, on its thread
+        hulk::lua_mods::Tick(hulk::g_world_dt);  // plain-text Lua mods, on the same thread and step (lua_mods.h)
         return;
     }
     // A critical move's slow motion scales the game's frame time down, and the console ran
@@ -126,6 +128,7 @@ X86_FUNC(WORLD_UPDATE) {
         hulk::cheats::RunAppliers(ctx, base);  // cheats.h: after the world's update, on its thread
         ctx.eax = eax;
         hulk::plugins::Tick(hulk::g_world_dt);  // plugins.h: after the world's update, on its thread
+        hulk::lua_mods::Tick(hulk::g_world_dt);  // plain-text Lua mods, on the same thread and step (lua_mods.h)
         return;
     }
     // When a cutscene shot ends, the game holds its renderer (the render manager's byte +0x31, set by
@@ -144,6 +147,7 @@ X86_FUNC(WORLD_UPDATE) {
         hulk::cheats::RunAppliers(ctx, base);  // cheats.h: after the world's update, on its thread
         ctx.eax = eax;
         hulk::plugins::Tick(hulk::g_world_dt);  // plugins.h: after the world's update, on its thread
+        hulk::lua_mods::Tick(hulk::g_world_dt);  // plain-text Lua mods, on the same thread and step (lua_mods.h)
         return;
     }
     const unsigned steps = clock.Advance(elapsed);
@@ -171,5 +175,6 @@ X86_FUNC(WORLD_UPDATE) {
         hulk::cheats::RunAppliers(ctx, base);  // cheats.h: after the world's update, on its thread
         ctx.eax = eax;
         hulk::plugins::Tick(hulk::g_world_dt);  // plugins.h: after the world's update, on its thread
+        hulk::lua_mods::Tick(hulk::g_world_dt);  // plain-text Lua mods, on the same thread and step (lua_mods.h)
     }
 }

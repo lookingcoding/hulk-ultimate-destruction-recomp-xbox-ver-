@@ -44,6 +44,7 @@ Copy-Verified "$project\sdk\THIRD_PARTY.txt" 'THIRD_PARTY.txt'
 Copy-Verified "$project\plugins\hulk_plugin.h" 'plugins\hulk_plugin.h'
 Copy-Verified "$project\plugins\example_trainer.cpp" 'plugins\example_trainer.cpp'
 Copy-Verified "$project\docs\plugin-api.md" 'docs\plugin-api.md'
+Copy-Verified "$project\docs\lua-mods.md" 'docs\lua-mods.md'
 
 New-Item -ItemType Directory -Path "$stage\assets" | Out-Null
 @'
